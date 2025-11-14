@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -10,10 +10,15 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
+    "@langchain/core": "^1.0.5",
+    "@langchain/google-genai": "^1.0.1",
+    "@langchain/langgraph": "^1.0.2",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "langsmith": "^0.3.79",
     "redis": "^5.9.0",
     "uuid": "^13.0.0"
   }
