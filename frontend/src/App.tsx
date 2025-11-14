@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+const API_BASE_URL = import.meta.env.MODE === 'production'
+  ? 'https://hear-and-there-production.up.railway.app'
+  : 'http://localhost:4000';
+
+const FRONTEND_VERSION = '1.0.2'; // Update this with each commit
 
 type Status = 'idle' | 'saving' | 'success' | 'error'
 
@@ -26,7 +30,7 @@ function App() {
     }
 
     setStatus('idle')
-    setMessage('Detecting your location')
+    setMessage('Detecting your location...')
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -56,7 +60,7 @@ function App() {
     }
 
     setStatus('saving')
-    setMessage('Saving your tour preferences')
+    setMessage('Saving your tour preferences...')
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/session`, {
@@ -99,15 +103,12 @@ function App() {
   return (
     <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-xl rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-        <header className="mb-8">
+        <header className="mb-8 text-center">
           <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
             Hear &amp; There
           </p>
-          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Start your walking tour</h1>
-          <p className="text-sm text-slate-600">
-            Tell us where you are and how long you want to wander. Well save a session and
-            prepare a route of audio stories for you.
-          </p>
+          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Start Your Tour</h1>
+          <p className="text-sm text-slate-600">Where are you starting from?</p>
         </header>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -175,8 +176,10 @@ function App() {
                 className="w-full cursor-pointer accent-[#f36f5e]"
               />
               <p className="text-xs text-slate-600">
-                I have <span className="font-semibold text-sky-800">{durationMinutes} minutes</span> to
-                explore.
+                <span className="mr-1" aria-hidden="true">
+                  ⏱️
+                </span>
+                <span className="font-semibold text-sky-800">{durationMinutes} minutes</span>
               </p>
             </div>
           </section>
@@ -187,11 +190,11 @@ function App() {
               disabled={!canSubmit || status === 'saving'}
               className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {status === 'saving' ? 'Saving session' : 'Propose tours'}
+              {status === 'saving' ? 'Saving session…' : 'Propose Tours'}
             </button>
 
             <div className="text-xs text-slate-500">
-              <p>Well store your preferences in a short-lived session so you can keep exploring.</p>
+              <p>We’ll save this session in Redis to begin your journey.</p>
             </div>
           </div>
         </form>
@@ -206,6 +209,11 @@ function App() {
             )}
           </div>
         )}
+      </div>
+      <div className="mt-8 text-center">
+        <p className="text-xs text-slate-300 font-light">
+          v{FRONTEND_VERSION}
+        </p>
       </div>
     </div>
   )

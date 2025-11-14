@@ -8,12 +8,12 @@
 
 ## 🎯 Overview
 
-**App Name:** Hear & There  
-**Framework:** React (with Vite or Next.js)  
-**UI Library:** Tailwind CSS (lightweight and mobile-friendly)  
-**Backend:** Node.js (Express or Fastify)  
-**Data Store:** Redis (session storage only for this step)  
-**Hosting:** Vercel (preferred) or Netlify for web app, Render or Fly.io for backend  
+**App Name:** Hear & There
+**Framework:** React with Vite
+**UI Library:** Tailwind CSS (lightweight and mobile-friendly)
+**Backend:** Node.js (Express)
+**Data Store:** Redis (session storage only for this step)
+**Hosting:** Frontend on Vercel, backend on Railway
 **Version:** MVP 0.1 — Focused on functional UI and Redis integration.
 
 ---
@@ -33,13 +33,13 @@
        - Range: **15 minutes → 4 hours**
        - Step: **5 minutes**
        - Label shows selected duration dynamically.
-   - **Generate Tours** button:
+   - **Propose Tours** button:
      - On click → stores both inputs in Redis with a generated `sessionId`.
      - Add timestamp to the record.
      - Confirmation message: "Session saved! Your journey is being prepared."
 
 2. **Backend (Node.js + Redis)**
-   - Simple Express or Fastify server.
+   - Simple Express server.
    - One endpoint: `POST /api/session`
      - Body:
        ```json
@@ -99,8 +99,9 @@
    cd hear-and-there
    ```
 
-2. Install dependencies:
+2. Install frontend dependencies:
    ```
+   cd frontend
    npm install
    ```
 
@@ -109,7 +110,7 @@
    npm run dev
    ```
 
-4. Open your browser and navigate to `http://localhost:3000` to see the app in action.
+4. Open your browser and navigate to `http://localhost:5173` to see the app in action.
 
 ### Backend
 
@@ -128,7 +129,7 @@
    npm start
    ```
 
-4. The backend server will run on `http://localhost:3001` by default.
+4. The backend server will run on `http://localhost:4000` by default (or on the port specified in the `PORT` environment variable).
 
 ---
 
@@ -136,9 +137,9 @@
 
 ### Frontend
 
-- **Framework:** React (with Vite or Next.js)
+- **Framework:** React with Vite
 - **UI Library:** Tailwind CSS
-- **Build Tool:** Vite (for Vite) or Webpack (for Next.js)
+- **Build Tool:** Vite
 - **State Management:** React Context or Redux (if needed)
 - **Testing Framework:** Jest
 - **Linting Tool:** ESLint
@@ -146,12 +147,26 @@
 
 ### Backend
 
-- **Framework:** Node.js (Express or Fastify)
+- **Framework:** Node.js (Express)
 - **Database:** Redis
 - **Build Tool:** NPM
 - **Testing Framework:** Jest
 - **Linting Tool:** ESLint
 - **Version Control:** Git
+
+### Versioning & Deployment Tracking
+
+- **Version Format:** Semantic versioning (e.g., 1.0.2)
+- **Backend Health Endpoint:** `GET /health` returns:
+  ```json
+  {
+    "status": "ok",
+    "version": "1.0.2"
+  }
+  ```
+- **Frontend Version Display:** Version shown at bottom of page in light gray text (e.g., "v1.0.2")
+- **Version Updates:** Increment patch version (x.x.+1) with each commit for deployment tracking
+- **Auto-Deployment:** Both Vercel (frontend) and Railway (backend) deploy automatically on git push to main branch
 
 ---
 

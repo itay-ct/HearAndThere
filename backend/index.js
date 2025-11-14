@@ -2,15 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('redis');
 const { v4: uuidv4 } = require('uuid');
+const { version } = require('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Prefer configuring this via the REDIS_URL env var in local/dev.
 // Falls back to the URL you provided.
-const REDIS_URL =
-  process.env.REDIS_URL ||
-  'redis://default:wNqKzQrXYYFugJzyqmzIGvo2HTYzYXIz@redis-18306.fcrce259.eu-central-1-3.ec2.cloud.redislabs.com:18306';
+const REDIS_URL = process.env.REDIS_URL;
+if (!REDIS_URL) {
+  console.error('REDIS_URL environment variable is not set');
+  process.exit(1);
+}
 
 const redisClient = createClient({ url: REDIS_URL });
 
@@ -27,16 +30,28 @@ async function start() {
     process.exit(1);
   }
 
-  app.use(cors());
+  app.use(cors({
+    origin: [
+      'http://localhost:3000',
+      'https://here-and-there-phi.vercel.app'
+    ],
+    credentials: true
+  }));
   app.use(express.json());
 
   app.get('/health', async (req, res) => {
     try {
       await redisClient.ping();
-      res.json({ status: 'ok' });
+      res.json({
+        status: 'ok',
+        version: version,
+      });
     } catch (err) {
       console.error('Health check failed', err);
-      res.status(500).json({ status: 'redis-error' });
+      res.status(500).json({
+        status: 'redis-error',
+        version: version,
+      });
     }
   });
 
