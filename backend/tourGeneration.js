@@ -1,17 +1,6 @@
 import { Client } from "langsmith";
 import { traceable } from "langsmith/traceable";
 
-// Initialize LangSmith client with explicit config
-const langsmithClient = new Client({
-  apiKey: process.env.LANGSMITH_API_KEY,
-  apiUrl: process.env.LANGSMITH_ENDPOINT || "https://eu.api.smith.langchain.com"
-});
-
-// Set environment variables for automatic tracing
-process.env.LANGCHAIN_TRACING_V2 = "true";
-process.env.LANGCHAIN_PROJECT = "pr-fresh-snug-86";
-process.env.LANGSMITH_ENDPOINT = "https://eu.api.smith.langchain.com";
-
 // Add debug logging at the top
 console.log('[tourGeneration] LangSmith config check:', {
   LANGSMITH_API_KEY: process.env.LANGSMITH_API_KEY ? 'SET' : 'NOT_SET',
@@ -23,7 +12,7 @@ console.log('[tourGeneration] LangSmith config check:', {
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const WIKIPEDIA_MCP_BASE_URL = process.env.WIKIPEDIA_MCP_BASE_URL;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro'; // This should have a default
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 // Add this debug log right after the constants
@@ -67,25 +56,22 @@ async function getGeminiModel() {
     console.warn('[tourGeneration] GEMINI_API_KEY is not set');
     return null;
   }
+
   if (!geminiModelPromise) {
     geminiModelPromise = import('@langchain/google-genai')
       .then((mod) => {
         const { ChatGoogleGenerativeAI } = mod;
-        console.log('[tourGeneration] Creating ChatGoogleGenerativeAI with:', {
-          apiKey: GEMINI_API_KEY ? 'SET' : 'NOT_SET',
-          model: 'gemini-2.0-flash-exp' // Use 'model' instead of 'modelName'
-        });
         return new ChatGoogleGenerativeAI({
           apiKey: GEMINI_API_KEY,
-          model: 'gemini-2.0-flash-exp', // Changed from modelName to model
+          model: GEMINI_MODEL,
         });
       })
       .catch((err) => {
-        console.warn('[tourGeneration] Failed to load @langchain/google-genai', err.message);
-        console.warn('[tourGeneration] Full error:', err);
+        console.warn('[tourGeneration] Failed to load @langchain/google-genai', err);
         return null;
       });
   }
+  
   return geminiModelPromise;
 }
 
@@ -316,8 +302,12 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
   }
 
   const systemPrompt = [
-    'You are a tour-planning assistant that creates walking tours.',
-    'Given a starting point, nearby points of interest, and some context,',
+    'You are a tour-planning assistant with access to real-time Google Maps data.',
+    'Use Google Maps to find actual places, verify locations, and calculate real walking distances.',
+    'Create walking tours using ONLY real places that exist on Google Maps.',
+    'Verify each location exists before including it in a tour.',
+    'Calculate accurate walking times between actual coordinates.',
+    'Given a starting point, nearby points of interest, and context,',
     'propose around 10 candidate walking tours with clear themes.',
     'Each tour must fit roughly within the requested total minutes.',
     'Respond strictly as JSON with a top-level "tours" array.',
