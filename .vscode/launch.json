@@ -7,11 +7,38 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch Program",
+            "name": "Launch Backend",
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/backend/index.js"
+            "runtimeExecutable": "/opt/homebrew/bin/node",
+            "program": "${workspaceFolder}/backend/index.js",
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "NODE_ENV": "development"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Frontend (Vite)",
+            "runtimeExecutable": "/opt/homebrew/bin/npm",
+            "runtimeArgs": ["run", "dev"],
+            "cwd": "${workspaceFolder}/frontend",
+            "console": "integratedTerminal",
+            "serverReadyAction": {
+                "pattern": "Local:   (https?://localhost:[0-9]+)",
+                "uriFormat": "%s",
+                "action": "openExternally"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Launch Full Stack",
+            "configurations": ["Launch Backend", "Launch Frontend (Vite)"],
+            "stopAll": true
         }
     ]
 }
