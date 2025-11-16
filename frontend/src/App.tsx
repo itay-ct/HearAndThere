@@ -123,15 +123,34 @@ function App() {
         setLongitude(Number(pos.coords.longitude.toFixed(6)))
         setMessage('Location detected. You can fine-tune it if needed.')
       },
-      (err) => {
+      async (err) => {
         console.error('Geolocation error', err)
+        
+        // Try IP-based location as fallback
+        try {
+          setMessage('GPS unavailable, trying IP-based location...')
+          const response = await fetch('https://ipapi.co/json/')
+          const data = await response.json()
+          
+          if (data.latitude && data.longitude) {
+            setLatitude(Number(data.latitude.toFixed(6)))
+            setLongitude(Number(data.longitude.toFixed(6)))
+            setMessage('Approximate location detected via IP. You can fine-tune it if needed.')
+            return
+          }
+        } catch (ipError) {
+          console.error('IP location failed:', ipError)
+        }
+        
+        // Final fallback
         setStatus('error')
-        setMessage('Unable to retrieve your location. You can fill it in manually.')
+        setMessage('Location unavailable. Please enter coordinates manually.')
       },
       {
-        enableHighAccuracy: true,
-        timeout: 10_000,
-      },
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 300000
+      }
     )
   }, [])
 
