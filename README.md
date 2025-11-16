@@ -16,6 +16,8 @@ A smart walking tour generator that creates personalized tours using AI based on
 - **Backend**: Node.js + Express + LangGraph
 - **AI**: Google Gemini for tour generation
 - **Storage**: Redis for sessions
+- **Deployment**: Vercel (frontend), Railway (backend)
+- **Monitoring**: LangSmith for AI observability
 
 ## Quick Start
 
@@ -28,11 +30,11 @@ A smart walking tour generator that creates personalized tours using AI based on
 git clone https://github.com/YOUR_USERNAME/hear-and-there.git
 cd hear-and-there
 
-# Backend
+# Backend setup
 cd backend && npm install
 cp .env.example .env  # Add your API keys
 
-# Frontend  
+# Frontend setup
 cd ../frontend && npm install
 ```
 
@@ -45,22 +47,22 @@ GEMINI_API_KEY=your_key_here
 PORT=4000
 ```
 
-### Run
+### Run Both Services
 ```bash
 # Terminal 1: Start Redis
 redis-server
 
-# Terminal 2: Backend
+# Terminal 2: Start Backend
 cd backend && npm start
 
-# Terminal 3: Frontend
+# Terminal 3: Start Frontend
 cd frontend && npm run dev
 ```
 
 Open `http://localhost:5173`
 
 ## VS Code Debug
-Press F5 and select "Launch Full Stack"
+Press F5 and select "Launch Full Stack" to run both backend and frontend
 
 ## API
 - `GET /health` - Health check
