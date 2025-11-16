@@ -47,7 +47,7 @@ async function start() {
       'http://localhost:5173', // Vite default port
       'http://localhost:4173', // Vite preview port
       'http://localhost:5174', // Another common Vite port
-      'https://here-and-there-phi.vercel.app'
+      'https://hear-and-there.vercel.app'  // New correct URL
     ],
     credentials: true
   }));
