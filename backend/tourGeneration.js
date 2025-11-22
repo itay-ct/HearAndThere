@@ -134,41 +134,260 @@ async function reverseGeocode(latitude, longitude) {
   return { city, neighborhood };
 }
 
-async function searchNearbyPois(latitude, longitude) {
+async function cachePlaceInRedis(redisClient, place) {
+  if (!redisClient || !place.id) return;
+
+  const placeKey = `poi:${place.id}`;
+  const geoKey = 'geo:pois';
+  
+  try {
+    // Check if place already exists
+    let existingPlace = null;
+    try {
+      const existing = await redisClient.json.get(placeKey, { path: '$' });
+      existingPlace = existing && existing[0];
+    } catch (jsonErr) {
+      // Key doesn't exist or not JSON, that's fine
+      console.log('[tourGeneration] No existing place found for', place.id);
+    }
+    
+    // Prepare place document
+    const placeDoc = {
+      place_id: place.id,
+      name: place.name,
+      types: place.types || [],
+      location: {
+        lat: place.latitude,
+        lon: place.longitude
+      },
+      rating: place.rating,
+      source: 'google_places_api',
+      fetched_at: new Date().toISOString(),
+      pinned: existingPlace?.pinned || false,
+      notes: existingPlace?.notes || null,
+      tags: existingPlace?.tags || [],
+      images: existingPlace?.images || []
+    };
+
+    console.log('[tourGeneration] Caching place:', {
+      id: place.id,
+      name: place.name,
+      lat: place.latitude,
+      lon: place.longitude,
+      key: placeKey
+    });
+
+    // Upsert the place document
+    await redisClient.json.set(placeKey, '$', placeDoc);
+    
+    // Set TTL only if not pinned
+    if (!placeDoc.pinned) {
+      await redisClient.expire(placeKey, 7 * 24 * 60 * 60); // 7 days
+    }
+    
+    // Add to geospatial index
+    await redisClient.geoAdd(geoKey, {
+      longitude: place.longitude,
+      latitude: place.latitude,
+      member: place.id
+    });
+    
+    console.log('[tourGeneration] Successfully cached place', place.id);
+  } catch (err) {
+    console.error('[tourGeneration] Failed to cache place', place.id, err);
+  }
+}
+
+async function searchNearbyPois(latitude, longitude, redisClient = null) {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[tourGeneration] GOOGLE_MAPS_API_KEY is not set; skipping POI search.');
     debugLog('searchNearbyPois: missing GOOGLE_MAPS_API_KEY');
     return [];
   }
 
-  const radiusMeters = 1500; // ~15–20 minute walking radius
-  const url =
-    `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}` +
-    `&radius=${radiusMeters}&type=tourist_attraction|museum|park|point_of_interest&key=${GOOGLE_MAPS_API_KEY}`;
+  const radiusMeters = 1500;
+  
+  const primaryTypes = [
+  'historical_place',
+  'historical_landmark',
+  'monument',
+  'cultural_landmark',
+  'museum',
+  'art_gallery',
+  'sculpture',
+  'performing_arts_theater',
+  'auditorium',
+  'cultural_center',
+  'park',
+  'botanical_garden',
+  'plaza',
+  'garden',
+  'visitor_center',
+  'ice_cream_shop',
+  'bakery',
+  'cafe',
+  'confectionery',
+  'coffee_shop',
+  'restaurant',
+  'bar',
+  'sandwich_shop',
+  'gift_shop',
+  'book_store',
+  'market',
+  'shopping_mall',
+  'church',
+  'hindu_temple',
+  'mosque',
+  'synagogue',
+  'observation_deck',
+  'amphitheatre',
+  'picnic_ground',
+  'wildlife_park',
+  'zoo',
+  'night_club',
+  'amusement_center',
+  'tourist_attraction',
+  'train_station',
+  'city_hall',
+  'courthouse',
+  'fire_station',
+  'public_bathroom',
+  'cemetery',
+  'barbecue_area',
+  'bus_station',
+  'library',
+  'planetarium',
+  'opera_house'
+];
 
-  debugLog('searchNearbyPois: requesting', url);
-  const res = await safeFetch(url);
+const secondaryTypes = [
+  'art_studio',
+  'farm',
+  'ranch',
+  'adventure_sports_center',
+  'dog_park',
+  'internet_cafe',
+  'marina',
+  'movie_rental',
+  'roller_coaster',
+  'skateboard_park',
+  'wildlife_refuge',
+  'acai_shop',
+  'bagel_shop',
+  'cat_cafe',
+  'dog_cafe',
+  'juice_shop',
+  'vegan_restaurant',
+  'vegetarian_restaurant',
+  'wine_bar',
+  'local_government_office',
+  'embassy',
+  'massage',
+  'sauna',
+  'skin_care_clinic',
+  'yoga_studio',
+  'apartment_building',
+  'campground',
+  'mobile_home_park',
+  'beach',
+  'playground',
+  'ski_resort',
+  'athletic_field',
+  'ice_skating_rink',
+  'ferry_terminal',
+  'taxi_stand',
+  'transit_depot',
+  'truck_stop',
+  'electronics_store',
+  'hardware_store',
+  'liquor_store',
+  'wholesaler',
+  'fishing_charter',
+  'fishing_pond',
+  'summer_camp_organizer',
+  'public_bath',
+  'accounting',
+  'chiropractor',
+  'body_art_service'
+];
+
+  const allResults = [];
+
+  const [primaryResults, secondaryResults] = await Promise.all([
+    searchPlacesNearby(latitude, longitude, radiusMeters, primaryTypes),
+    searchPlacesNearby(latitude, longitude, radiusMeters, secondaryTypes)
+  ]);
+
+  allResults.push(...primaryResults, ...secondaryResults);
+
+  // Remove duplicates by place_id
+  const uniqueResults = [];
+  const seenIds = new Set();
+  for (const place of allResults) {
+    if (!seenIds.has(place.id)) {
+      seenIds.add(place.id);
+      uniqueResults.push(place);
+    }
+  }
+
+  // Cache all places in Redis
+  if (redisClient) {
+    await Promise.all(
+      uniqueResults.map(place => cachePlaceInRedis(redisClient, place))
+    );
+  }
+
+  debugLog('searchNearbyPois: got unique results count', uniqueResults.length);
+  return uniqueResults.slice(0, 20);
+}
+
+async function searchPlacesNearby(latitude, longitude, radiusMeters, includedTypes) {
+  const url = 'https://places.googleapis.com/v1/places:searchNearby';
+  
+  const requestBody = {
+    includedTypes,
+    maxResultCount: 20,
+    locationRestriction: {
+      circle: {
+        center: {
+          latitude,
+          longitude
+        },
+        radius: radiusMeters
+      }
+    }
+  };
+
+  debugLog('searchPlacesNearby: requesting', { url, types: includedTypes.length });
+  
+  const res = await safeFetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.types,places.location,places.rating'
+    },
+    body: JSON.stringify(requestBody)
+  });
+
   if (!res.ok) {
-    console.warn('[tourGeneration] Nearby search failed with status', res.status);
-    debugLog('searchNearbyPois: non-OK response', res.status);
+    console.warn('[tourGeneration] Places search failed with status', res.status);
+    debugLog('searchPlacesNearby: non-OK response', res.status);
     return [];
   }
 
   const data = await res.json();
-  const results = Array.isArray(data.results) ? data.results : [];
-  debugLog('searchNearbyPois: got results count', results.length);
+  const places = Array.isArray(data.places) ? data.places : [];
+  debugLog('searchPlacesNearby: got places count', places.length);
 
-  return results.slice(0, 20).map((place, index) => {
-    const loc = place.geometry && place.geometry.location;
-    return {
-      id: place.place_id || `poi_${index + 1}`,
-      name: place.name,
-      latitude: loc ? loc.lat : latitude,
-      longitude: loc ? loc.lng : longitude,
-      types: place.types || [],
-      rating: place.rating || null,
-    };
-  });
+  return places.map((place, index) => ({
+    id: place.id || `poi_${index + 1}`,
+    name: place.displayName?.text || 'Unknown Place',
+    latitude: place.location?.latitude || latitude,
+    longitude: place.location?.longitude || longitude,
+    types: place.types || [],
+    rating: place.rating || null,
+  }));
 }
 
 async function generateCitySummary(city) {
@@ -232,16 +451,16 @@ async function generateNeighborhoodSummary(neighborhood, city) {
   return { summary: null, keyFacts: null };
 }
 
-async function buildAreaContext({ latitude, longitude }) {
+async function buildAreaContext({ latitude, longitude, redisClient = null }) {
   debugLog('buildAreaContext: start', { latitude, longitude });
   
   // Run geocoding and POI search in parallel
   const [{ city, neighborhood }, pois] = await Promise.all([
     reverseGeocode(latitude, longitude),
-    searchNearbyPois(latitude, longitude),
+    searchNearbyPois(latitude, longitude, redisClient), // Pass redisClient
   ]);
 
-  // Run city and neighborhood summaries in parallel (no Wikipedia dependency)
+  // Run city and neighborhood summaries in parallel
   const [cityData, neighborhoodData] = await Promise.all([
     generateCitySummary(city),
     generateNeighborhoodSummary(neighborhood, city),
@@ -658,6 +877,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   if (!modules) {
     throw new Error('LangGraph modules not available');
   }
+
   const { StateGraph, MessagesAnnotation, START, END } = modules;
   const sessionKey = sessionId ? `session:${sessionId}` : null;
 
@@ -665,14 +885,15 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     const messages = Array.isArray(state.messages) ? state.messages : [];
     let areaContext;
     try {
-      areaContext = await buildAreaContext({ latitude, longitude });
+      areaContext = await buildAreaContext({ latitude, longitude, redisClient });
     } catch (err) {
       console.warn('[tourGeneration] buildAreaContext failed in collectContextNode', err);
       areaContext = {
         city: null,
         neighborhood: null,
         pois: [],
-        summaries: { citySummary: null, neighborhoodSummary: null },
+        cityData: { summary: null, keyFacts: null },
+        neighborhoodData: { summary: null, keyFacts: null },
       };
     }
     if (redisClient && sessionKey) {
@@ -704,7 +925,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
         ? await loadAreaContextFromRedis({ redisClient, sessionKey })
         : null;
     if (!areaContext || !Array.isArray(areaContext.pois) || !areaContext.pois.length) {
-      areaContext = await buildAreaContext({ latitude, longitude });
+      areaContext = await buildAreaContext({ latitude, longitude, redisClient });
       if (redisClient && sessionKey) {
         await persistAreaContextToRedis({ redisClient, sessionKey, areaContext });
       }
@@ -716,55 +937,21 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       city: areaContext.city,
       neighborhood: areaContext.neighborhood,
       pois: areaContext.pois,
-      summaries: areaContext.summaries,
+      cityData: areaContext.cityData,
+      neighborhoodData: areaContext.neighborhoodData,
     });
     
     console.log('[tourGeneration] generateCandidatesNode: generated tours count', Array.isArray(rawTours) ? rawTours.length : 0);
     
+    // Skip ranking - use tours directly
+    const finalTours = Array.isArray(rawTours) ? rawTours.slice(0, 3) : [];
+    
     if (redisClient && sessionKey) {
-      await persistCandidateTours({ redisClient, sessionKey, tours: rawTours });
-      await redisClient.hSet(sessionKey, { stage: 'candidates_generated' });
+      await persistFinalTours({ redisClient, sessionKey, tours: finalTours });
     }
     const msg = {
       role: 'system',
-      content: `Generated ${Array.isArray(rawTours) ? rawTours.length : 0} candidate tours using Gemini.`,
-    };
-    if (redisClient && sessionKey) {
-      await appendMessagesToRedis({ redisClient, sessionKey, messages: [msg] });
-    }
-    return { messages: [...messages, msg] };
-  };
-
-  const rankToursNode = async (state) => {
-    const messages = Array.isArray(state.messages) ? state.messages : [];
-    let candidateTours =
-      redisClient && sessionKey
-        ? await loadCandidateTours({ redisClient, sessionKey })
-        : [];
-    if (!candidateTours.length) {
-      let areaContext =
-        redisClient && sessionKey
-          ? await loadAreaContextFromRedis({ redisClient, sessionKey })
-          : null;
-      if (!areaContext || !Array.isArray(areaContext.pois) || !areaContext.pois.length) {
-        areaContext = await buildAreaContext({ latitude, longitude });
-      }
-      candidateTours = heuristicToursFromPois({
-        latitude,
-        longitude,
-        durationMinutes,
-        city: areaContext.city,
-        neighborhood: areaContext.neighborhood,
-        pois: areaContext.pois,
-      });
-    }
-    const topTours = filterAndRankTours(candidateTours, durationMinutes);
-    if (redisClient && sessionKey) {
-      await persistFinalTours({ redisClient, sessionKey, tours: topTours });
-    }
-    const msg = {
-      role: 'system',
-      content: `Ranked tours and selected top ${Array.isArray(topTours) ? topTours.length : 0} tours.`,
+      content: `Generated ${Array.isArray(rawTours) ? rawTours.length : 0} tours, selected top ${finalTours.length}.`,
     };
     if (redisClient && sessionKey) {
       await appendMessagesToRedis({ redisClient, sessionKey, messages: [msg] });
@@ -775,11 +962,9 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   const graph = new StateGraph(MessagesAnnotation)
     .addNode('collect_context', collectContextNode)
     .addNode('generate_candidate_tours', generateCandidatesNode)
-    .addNode('rank_tours', rankToursNode)
     .addEdge(START, 'collect_context')
     .addEdge('collect_context', 'generate_candidate_tours')
-    .addEdge('generate_candidate_tours', 'rank_tours')
-    .addEdge('rank_tours', END)
+    .addEdge('generate_candidate_tours', END)
     .compile();
 
   return graph;
