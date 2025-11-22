@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
-const FRONTEND_VERSION = '1.0.4'; // Update this with each commit
+const FRONTEND_VERSION = '1.0.5'; // Update this with each commit
 
 type View = 'form' | 'tours'
 

@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "@langchain/core": "^1.0.5",
     "@langchain/google-genai": "^1.0.1",
     "@langchain/langgraph": "^1.0.2",
+    "@langchain/langgraph-checkpoint-redis": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",

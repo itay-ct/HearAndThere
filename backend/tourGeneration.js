@@ -1,5 +1,6 @@
 import { Client } from "langsmith";
 import { traceable } from "langsmith/traceable";
+import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
 
 // Add debug logging at the top
 console.log('[tourGeneration] LangSmith config check:', {
@@ -581,13 +582,22 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
+  // Prepare POI data without place_id for LLM
+  const poisForLLM = Array.isArray(pois) ? pois.map(poi => ({
+    name: poi.name,
+    latitude: poi.latitude,
+    longitude: poi.longitude,
+    types: poi.types,
+    rating: poi.rating
+  })) : [];
+
   const userPayload = {
     latitude,
     longitude,
     durationMinutes,
     city,
     neighborhood,
-    pois,
+    pois: poisForLLM, // Use cleaned POI data without place_id
     cityData,
     neighborhoodData,
   };
@@ -608,7 +618,7 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     durationMinutes,
     city,
     neighborhood,
-    poiCount: Array.isArray(pois) ? pois.length : 0,
+    poiCount: poisForLLM.length,
   });
 
   try {
@@ -879,7 +889,25 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   }
 
   const { StateGraph, MessagesAnnotation, START, END } = modules;
-  const sessionKey = sessionId ? `session:${sessionId}` : null;
+
+  // Use Annotation.Root to extend MessagesAnnotation
+  const { Annotation } = await import('@langchain/langgraph');
+  
+  const TourState = Annotation.Root({
+    ...MessagesAnnotation.spec,
+    areaContext: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => null,
+    }),
+    candidateTours: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => [],
+    }),
+    finalTours: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => [],
+    }),
+  });
 
   const collectContextNode = async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
@@ -896,40 +924,31 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
         neighborhoodData: { summary: null, keyFacts: null },
       };
     }
-    if (redisClient && sessionKey) {
-      try {
-        await persistAreaContextToRedis({ redisClient, sessionKey, areaContext });
-        await redisClient.hSet(sessionKey, { stage: 'context_collected' });
-      } catch (err) {
-        console.warn('[tourGeneration] Failed to persist area context to Redis', err);
-      }
-    }
+
     const summaryParts = [];
     if (areaContext.city) summaryParts.push(`city=${areaContext.city}`);
     if (areaContext.neighborhood) summaryParts.push(`neighborhood=${areaContext.neighborhood}`);
     summaryParts.push(`pois=${Array.isArray(areaContext.pois) ? areaContext.pois.length : 0}`);
+    
     const msg = {
       role: 'system',
       content: `Collected area context for session ${sessionId || 'n/a'} (${summaryParts.join(', ')}).`,
     };
-    if (redisClient && sessionKey) {
-      await appendMessagesToRedis({ redisClient, sessionKey, messages: [msg] });
-    }
-    return { messages: [...messages, msg] };
+
+    return { 
+      messages: [...messages, msg],
+      areaContext
+    };
   };
 
   const generateCandidatesNode = async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
-    let areaContext =
-      redisClient && sessionKey
-        ? await loadAreaContextFromRedis({ redisClient, sessionKey })
-        : null;
-    if (!areaContext || !Array.isArray(areaContext.pois) || !areaContext.pois.length) {
-      areaContext = await buildAreaContext({ latitude, longitude, redisClient });
-      if (redisClient && sessionKey) {
-        await persistAreaContextToRedis({ redisClient, sessionKey, areaContext });
-      }
+    const areaContext = state.areaContext;
+
+    if (!areaContext) {
+      throw new Error('Area context not available in state');
     }
+
     const rawTours = await generateToursWithGemini({
       latitude,
       longitude,
@@ -943,29 +962,61 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     
     console.log('[tourGeneration] generateCandidatesNode: generated tours count', Array.isArray(rawTours) ? rawTours.length : 0);
     
-    // Skip ranking - use tours directly
-    const finalTours = Array.isArray(rawTours) ? rawTours.slice(0, 3) : [];
+    const allTours = Array.isArray(rawTours) ? rawTours : [];
     
-    if (redisClient && sessionKey) {
-      await persistFinalTours({ redisClient, sessionKey, tours: finalTours });
-    }
     const msg = {
       role: 'system',
-      content: `Generated ${Array.isArray(rawTours) ? rawTours.length : 0} tours, selected top ${finalTours.length}.`,
+      content: `Generated ${Array.isArray(rawTours) ? rawTours.length : 0} tours, keeping all ${allTours.length} for validation.`,
     };
-    if (redisClient && sessionKey) {
-      await appendMessagesToRedis({ redisClient, sessionKey, messages: [msg] });
-    }
-    return { messages: [...messages, msg] };
+
+    return { 
+      messages: [...messages, msg],
+      candidateTours: allTours
+    };
   };
 
-  const graph = new StateGraph(MessagesAnnotation)
+  const validateWalkingTimesNode = async (state) => {
+    const messages = Array.isArray(state.messages) ? state.messages : [];
+    const tours = state.candidateTours || [];
+    
+    if (!tours.length) {
+      console.warn('[tourGeneration] No tours to validate walking times for');
+      return { messages };
+    }
+    
+    console.log('[tourGeneration] validateWalkingTimesNode: validating', tours.length, 'tours');
+    
+    // Pass latitude and longitude to validateWalkingTimes
+    const validatedTours = await validateWalkingTimes(tours, latitude, longitude, redisClient);
+    
+    const msg = {
+      role: 'system',
+      content: `Validated walking times for ${validatedTours.length} tours using Google Maps.`,
+    };
+
+    return { 
+      messages: [...messages, msg],
+      finalTours: validatedTours
+    };
+  };
+
+  // Create Redis checkpointer with error handling
+  let checkpointer = null;
+  try {
+    checkpointer = new RedisSaver(redisClient);
+  } catch (err) {
+    console.warn('[tourGeneration] Redis checkpointer failed to initialize, running without persistence:', err.message);
+  }
+
+  const graph = new StateGraph(TourState)
     .addNode('collect_context', collectContextNode)
     .addNode('generate_candidate_tours', generateCandidatesNode)
+    .addNode('validate_walking_times', validateWalkingTimesNode)
     .addEdge(START, 'collect_context')
     .addEdge('collect_context', 'generate_candidate_tours')
-    .addEdge('generate_candidate_tours', END)
-    .compile();
+    .addEdge('generate_candidate_tours', 'validate_walking_times')
+    .addEdge('validate_walking_times', END)
+    .compile(checkpointer ? { checkpointer } : {}); // Use checkpointer if available
 
   return graph;
 }
@@ -1005,51 +1056,153 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     redisClient,
   });
 
-  await graph.invoke(
+  // Use thread_id for checkpointing
+  const config = {
+    configurable: { thread_id: sessionId || 'default' },
+  };
+
+  const finalState = await graph.invoke(
     { messages: [] },
-    {
-      configurable: { thread_id: sessionId || undefined },
-    },
+    config
   );
 
-  if (sessionId) {
-    const sessionKey = `session:${sessionId}`;
-    try {
-      const base = await redisClient.hGetAll(sessionKey);
-      if (base && typeof base === 'object') {
-        if (base.city) city = base.city;
-        if (base.neighborhood) neighborhood = base.neighborhood;
-      }
-
-      // Use RedisJSON to read tours instead of lRange
-      const jsonKey = `${sessionKey}:tours`;
-      try {
-        const toursFromJson = await redisClient.json.get(jsonKey, { path: '$' });
-        if (Array.isArray(toursFromJson) && toursFromJson.length > 0 && Array.isArray(toursFromJson[0])) {
-          tours = toursFromJson[0];
-        }
-      } catch (jsonErr) {
-        console.log('[tourGeneration] No JSON tours found, trying fallback from hash');
-        // Fallback to hash field if JSON doesn't exist
-        if (base && base.tours) {
-          try {
-            const parsed = JSON.parse(base.tours);
-            if (Array.isArray(parsed)) {
-              tours = parsed;
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[tourGeneration] Failed to read final tours from Redis', err);
-    }
+  // Extract results from final state
+  if (finalState.areaContext) {
+    city = finalState.areaContext.city;
+    neighborhood = finalState.areaContext.neighborhood;
   }
+  
+  tours = finalState.finalTours || [];
 
   return {
     city,
     neighborhood,
     tours,
   };
+}
+
+async function validateWalkingTimes(tours, startLatitude, startLongitude, redisClient = null) {
+  if (!GOOGLE_MAPS_API_KEY || !Array.isArray(tours) || tours.length === 0) {
+    console.warn('[tourGeneration] Cannot validate walking times - missing API key or no tours');
+    return tours;
+  }
+
+  const validatedTours = [];
+
+  for (const tour of tours) {
+    if (!Array.isArray(tour.stops) || tour.stops.length < 1) {
+      validatedTours.push(tour);
+      continue;
+    }
+
+    try {
+      // Include the user's starting position as the origin
+      const origin = `${startLatitude},${startLongitude}`;
+      const destination = `${tour.stops[tour.stops.length - 1].latitude},${tour.stops[tour.stops.length - 1].longitude}`;
+      
+      // Build waypoints including ALL tour stops except the last one
+      let waypoints = '';
+      if (tour.stops.length > 1) {
+        const waypointCoords = tour.stops.slice(0, -1).map(stop => `${stop.latitude},${stop.longitude}`);
+        waypoints = waypointCoords.join('|');
+      }
+
+      const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+      url.searchParams.set('origin', origin);
+      url.searchParams.set('destination', destination);
+      if (waypoints) url.searchParams.set('waypoints', waypoints);
+      url.searchParams.set('mode', 'walking');
+      url.searchParams.set('key', GOOGLE_MAPS_API_KEY);
+
+      console.log('[tourGeneration] Validating walking times for tour:', tour.id);
+      
+      // Add timeout and retry logic
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(url.toString(), { 
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'HearAndThere/1.0'
+        }
+      });
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        console.warn('[tourGeneration] Directions API failed for tour', tour.id, response.status);
+        validatedTours.push(tour);
+        continue;
+      }
+
+      const data = await response.json();
+      if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
+        console.warn('[tourGeneration] No valid route found for tour', tour.id, 'API status:', data.status);
+        validatedTours.push(tour);
+        continue;
+      }
+
+      const route = data.routes[0];
+      const legs = route.legs || [];
+
+      // Now we should have legs.length === tour.stops.length (including start->first POI)
+      if (legs.length !== tour.stops.length) {
+        console.warn('[tourGeneration] Leg count mismatch for tour', tour.id, 'expected:', tour.stops.length, 'got:', legs.length);
+        validatedTours.push(tour);
+        continue;
+      }
+
+      // Calculate LLM vs Google Maps walking times
+      let llmTotalWalkingMinutes = 0;
+      let googleTotalWalkingMinutes = 0;
+
+      const updatedStops = tour.stops.map((stop, index) => {
+        const updatedStop = {
+          ...stop,
+          walkMinutesFromPrevious_llm: stop.walkMinutesFromPrevious // Save original LLM estimate
+        };
+
+        // Get Google Maps walking time for this leg
+        const leg = legs[index];
+        const googleWalkingSeconds = leg.duration?.value || 0;
+        const googleWalkingMinutes = Math.ceil(googleWalkingSeconds / 60);
+        
+        updatedStop.walkMinutesFromPrevious = googleWalkingMinutes;
+        
+        llmTotalWalkingMinutes += stop.walkMinutesFromPrevious || 0;
+        googleTotalWalkingMinutes += googleWalkingMinutes;
+
+        return updatedStop;
+      });
+
+      // Calculate total tour time with Google Maps walking times
+      const totalDwellMinutes = updatedStops.reduce((sum, stop) => sum + (stop.dwellMinutes || 0), 0);
+      const updatedTotalMinutes = googleTotalWalkingMinutes + totalDwellMinutes;
+
+      const validatedTour = {
+        ...tour,
+        stops: updatedStops,
+        estimatedTotalMinutes_llm: tour.estimatedTotalMinutes, // Save original LLM estimate
+        estimatedTotalMinutes: updatedTotalMinutes
+      };
+
+      // Debug logging
+      console.log('[tourGeneration] Walking time validation for tour', tour.id, {
+        llmTotalWalkingMinutes,
+        googleTotalWalkingMinutes,
+        difference: googleTotalWalkingMinutes - llmTotalWalkingMinutes,
+        llmTotalTourMinutes: tour.estimatedTotalMinutes,
+        googleTotalTourMinutes: updatedTotalMinutes,
+        tourTimeDifference: updatedTotalMinutes - tour.estimatedTotalMinutes
+      });
+
+      validatedTours.push(validatedTour);
+
+    } catch (err) {
+      console.error('[tourGeneration] Error validating walking times for tour', tour.id, err.message);
+      // Always include the tour even if validation fails
+      validatedTours.push(tour);
+    }
+  }
+
+  return validatedTours;
 }
