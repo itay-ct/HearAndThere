@@ -171,48 +171,93 @@ async function searchNearbyPois(latitude, longitude) {
   });
 }
 
-async function fetchWikipediaSummary(title) {
-  if (!title) return null;
+async function generateCitySummary(city) {
+  if (!city || !GEMINI_API_KEY) return { summary: null, keyFacts: null };
+  
+  const model = await getGeminiModel();
+  if (!model) return { summary: null, keyFacts: null };
+
+  const prompt = `Generate a brief summary and key facts about ${city}. Respond as JSON:
+{
+  "summary": "2-3 sentence overview of the city",
+  "keyFacts": ["fact 1", "fact 2", "fact 3", "fact 4", "fact 5"]
+}`;
 
   try {
-    if (WIKIPEDIA_MCP_BASE_URL) {
-      const base = WIKIPEDIA_MCP_BASE_URL.replace(/\/$/, '');
-      const res = await safeFetch(`${base}/summary/${encodeURIComponent(title)}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.extract || data.summary || null;
+    const response = await model.invoke(prompt);
+    const text = response.content || '';
+    const jsonText = extractJsonFromText(text);
+    if (jsonText) {
+      const parsed = JSON.parse(jsonText);
+      return {
+        summary: parsed.summary || null,
+        keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
+      };
     }
-
-    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-    const res = await safeFetch(url, { headers: { 'Accept': 'application/json' } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.extract || null;
   } catch (err) {
-    console.warn('[tourGeneration] Wikipedia summary fetch failed', err);
-    return null;
+    console.warn(`[tourGeneration] Failed to generate city summary for ${city}`, err);
   }
+  
+  return { summary: null, keyFacts: null };
+}
+
+async function generateNeighborhoodSummary(neighborhood, city) {
+  if (!neighborhood || !GEMINI_API_KEY) return { summary: null, keyFacts: null };
+  
+  const model = await getGeminiModel();
+  if (!model) return { summary: null, keyFacts: null };
+
+  const location = city ? `${neighborhood}, ${city}` : neighborhood;
+  const prompt = `Generate a brief summary and key facts about ${location}. Respond as JSON:
+{
+  "summary": "2-3 sentence overview of the neighborhood",
+  "keyFacts": ["fact 1", "fact 2", "fact 3", "fact 4", "fact 5"]
+}`;
+
+  try {
+    const response = await model.invoke(prompt);
+    const text = response.content || '';
+    const jsonText = extractJsonFromText(text);
+    if (jsonText) {
+      const parsed = JSON.parse(jsonText);
+      return {
+        summary: parsed.summary || null,
+        keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
+      };
+    }
+  } catch (err) {
+    console.warn(`[tourGeneration] Failed to generate neighborhood summary for ${location}`, err);
+  }
+  
+  return { summary: null, keyFacts: null };
 }
 
 async function buildAreaContext({ latitude, longitude }) {
   debugLog('buildAreaContext: start', { latitude, longitude });
+  
+  // Run geocoding and POI search in parallel
   const [{ city, neighborhood }, pois] = await Promise.all([
     reverseGeocode(latitude, longitude),
     searchNearbyPois(latitude, longitude),
   ]);
 
-  const [citySummary, neighborhoodSummary] = await Promise.all([
-    fetchWikipediaSummary(city),
-    fetchWikipediaSummary(neighborhood && city ? `${neighborhood}, ${city}` : neighborhood),
+  // Run city and neighborhood summaries in parallel (no Wikipedia dependency)
+  const [cityData, neighborhoodData] = await Promise.all([
+    generateCitySummary(city),
+    generateNeighborhoodSummary(neighborhood, city),
   ]);
 
   const areaContext = {
     city: city || null,
     neighborhood: neighborhood || null,
     pois,
-    wikipedia: {
-      citySummary: citySummary || null,
-      neighborhoodSummary: neighborhoodSummary || null,
+    cityData: {
+      summary: cityData.summary,
+      keyFacts: cityData.keyFacts,
+    },
+    neighborhoodData: {
+      summary: neighborhoodData.summary,
+      keyFacts: neighborhoodData.keyFacts,
     },
   };
 
@@ -220,6 +265,8 @@ async function buildAreaContext({ latitude, longitude }) {
     city: areaContext.city,
     neighborhood: areaContext.neighborhood,
     poiCount: Array.isArray(areaContext.pois) ? areaContext.pois.length : 0,
+    hasCitySummary: !!cityData.summary,
+    hasNeighborhoodSummary: !!neighborhoodData.summary,
   });
 
   return areaContext;
@@ -284,7 +331,7 @@ function heuristicToursFromPois({ latitude, longitude, durationMinutes, city, po
   });
 }
 
-async function generateToursWithGemini({ latitude, longitude, durationMinutes, city, neighborhood, pois, wikipedia }) {
+async function generateToursWithGemini({ latitude, longitude, durationMinutes, city, neighborhood, pois, cityData, neighborhoodData }) {
   const fallback = () =>
     heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
 
@@ -322,7 +369,8 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     city,
     neighborhood,
     pois,
-    wikipedia,
+    cityData,
+    neighborhoodData,
   };
 
   const input = [
@@ -453,12 +501,12 @@ async function persistAreaContextToRedis({ redisClient, sessionKey, areaContext 
     }
   }
   
-  // Store Wikipedia data as JSON
-  if (areaContext.wikipedia) {
+  // Store summaries data as JSON
+  if (areaContext.summaries) {
     try {
-      await redisClient.json.set(`${sessionKey}:wikipedia`, '$', areaContext.wikipedia);
+      await redisClient.json.set(`${sessionKey}:summaries`, '$', areaContext.summaries);
     } catch (err) {
-      console.warn('[tourGeneration] Failed to store Wikipedia as JSON', err);
+      console.warn('[tourGeneration] Failed to store summaries as JSON', err);
     }
   }
 }
@@ -481,22 +529,22 @@ async function loadAreaContextFromRedis({ redisClient, sessionKey }) {
       console.log('[tourGeneration] No POIs found in Redis JSON');
     }
 
-    // Load Wikipedia data from JSON
-    let wikipedia = [];
+    // Load summaries data from JSON
+    let summaries = [];
     try {
-      const wikiFromJson = await redisClient.json.get(`${sessionKey}:wikipedia`, { path: '$' });
-      if (Array.isArray(wikiFromJson) && wikiFromJson.length > 0 && Array.isArray(wikiFromJson[0])) {
-        wikipedia = wikiFromJson[0];
+      const summariesFromJson = await redisClient.json.get(`${sessionKey}:summaries`, { path: '$' });
+      if (Array.isArray(summariesFromJson) && summariesFromJson.length > 0 && Array.isArray(summariesFromJson[0])) {
+        summaries = summariesFromJson[0];
       }
     } catch (err) {
-      console.log('[tourGeneration] No Wikipedia data found in Redis JSON');
+      console.log('[tourGeneration] No summaries data found in Redis JSON');
     }
 
     return {
       city: base.city,
       neighborhood: base.neighborhood || null,
       pois,
-      wikipedia,
+      summaries,
     };
   } catch (err) {
     console.warn('[tourGeneration] Failed to load area context from Redis', err);
@@ -588,7 +636,7 @@ async function cleanupRedisKeys({ redisClient, sessionKey }) {
     // Delete potentially conflicting keys
     const keysToDelete = [
       `${sessionKey}:pois`,
-      `${sessionKey}:wikipedia`, 
+      `${sessionKey}:summaries`,
       `${sessionKey}:candidate_tours`,
       `${sessionKey}:tours`
     ];
@@ -624,7 +672,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
         city: null,
         neighborhood: null,
         pois: [],
-        wikipedia: { citySummary: null, neighborhoodSummary: null },
+        summaries: { citySummary: null, neighborhoodSummary: null },
       };
     }
     if (redisClient && sessionKey) {
@@ -668,7 +716,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       city: areaContext.city,
       neighborhood: areaContext.neighborhood,
       pois: areaContext.pois,
-      wikipedia: areaContext.wikipedia,
+      summaries: areaContext.summaries,
     });
     
     console.log('[tourGeneration] generateCandidatesNode: generated tours count', Array.isArray(rawTours) ? rawTours.length : 0);
@@ -754,7 +802,7 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
       city: areaContext.city,
       neighborhood: areaContext.neighborhood,
       pois: areaContext.pois,
-      wikipedia: areaContext.wikipedia,
+      summaries: areaContext.summaries,
     });
     const topTours = filterAndRankTours(rawTours, durationMinutes);
     return {
