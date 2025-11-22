@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
-const FRONTEND_VERSION = '1.0.5'; // Update this with each commit
+const FRONTEND_VERSION = '1.0.6'; // Update this with each commit
 
 type View = 'form' | 'tours'
 
@@ -39,6 +39,8 @@ function App() {
   const [city, setCity] = useState<string | null>(null)
   const [neighborhood, setNeighborhood] = useState<string | null>(null)
   const [selectedTourId, setSelectedTourId] = useState<string | null>(null)
+  const [selectedTour, setSelectedTour] = useState<Tour | null>(null)
+  const [mapError, setMapError] = useState<string | null>(null)
 
   const progressIntervalRef = useRef<number | null>(null)
 
@@ -264,6 +266,105 @@ function App() {
     }
   }
 
+  const handleSelectTour = useCallback(async (tour: Tour) => {
+    setSelectedTourId(tour.id)
+    setSelectedTour(tour)
+    setMessage(`Loading map for "${tour.title}"...`)
+    
+    try {
+      // Check if Google Maps is loaded
+      if (!window.google || !window.google.maps) {
+        throw new Error('Google Maps not loaded')
+      }
+      
+      setMapError(null)
+      // Stay on tours view, map will render inline
+    } catch (error) {
+      console.error('Error loading map:', error)
+      setMapError(error instanceof Error ? error.message : 'Failed to load map')
+      setMessage(`Selected "${tour.title}". Map unavailable.`)
+    }
+  }, [])
+
+  const renderMapView = () => {
+    if (!selectedTour) return null
+    
+    return (
+      <>
+        <header className="mb-6 text-center">
+          <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
+            Hear &amp; There
+          </p>
+          <h1 className="text-3xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h1>
+          <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
+        </header>
+
+        {mapError ? (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {mapError}
+          </div>
+        ) : (
+          <div className="mb-6">
+            <div 
+              id="tour-map" 
+              className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100"
+            />
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div className="bg-slate-50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
+            <p className="text-xs text-slate-600 mb-3">
+              ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
+            </p>
+            
+            <ol className="space-y-2 text-xs text-slate-600">
+              {selectedTour.stops.map((stop, idx) => (
+                <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
+                  <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                  <span className="flex-1">
+                    {stop.name}{' '}
+                    <span className="text-slate-400">
+                      · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <button
+              type="button"
+              onClick={() => {
+                setView('tours')
+                setSelectedTour(null)
+                setMapError(null)
+              }}
+              className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
+            >
+              ← Back to tours
+            </button>
+            
+            <button
+              type="button"
+              onClick={() => {
+                setView('form')
+                setTours([])
+                setSelectedTourId(null)
+                setSelectedTour(null)
+                setMapError(null)
+              }}
+              className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
+            >
+              Start over
+            </button>
+          </div>
+        </div>
+      </>
+    )
+  }
 
   useEffect(() => {
     return () => {
@@ -279,6 +380,145 @@ function App() {
       return () => clearTimeout(timeout)
     }
   }, [status])
+
+  // Add effect to initialize map when map view loads
+  useEffect(() => {
+    if (view === 'tours' && selectedTour && window.google && window.google.maps) {
+      initializeMap()
+    }
+  }, [view, selectedTour])
+
+  // Add map initialization function
+  const initializeMap = useCallback(async () => {
+    if (!selectedTour || !latitude || !longitude) return
+    
+    try {
+      const mapElement = document.getElementById('tour-map')
+      if (!mapElement) return
+      
+      // Initialize map centered on user's starting location
+      const map = new window.google.maps.Map(mapElement, {
+        zoom: 15,
+        center: { lat: Number(latitude), lng: Number(longitude) },
+        mapTypeId: window.google.maps.MapTypeId.ROADMAP,
+      })
+      
+      // Add marker for starting location
+      new window.google.maps.Marker({
+        position: { lat: Number(latitude), lng: Number(longitude) },
+        map: map,
+        title: 'Start Point',
+        icon: {
+          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="8" fill="#10b981" stroke="white" stroke-width="2"/>
+              <circle cx="12" cy="12" r="3" fill="white"/>
+            </svg>
+          `),
+          scaledSize: new window.google.maps.Size(24, 24),
+        }
+      })
+      
+      // Add markers for each stop
+      selectedTour.stops.forEach((stop, index) => {
+        new window.google.maps.Marker({
+          position: { lat: stop.latitude, lng: stop.longitude },
+          map: map,
+          title: `${index + 1}. ${stop.name}`,
+          label: {
+            text: String(index + 1),
+            color: 'white',
+            fontWeight: 'bold',
+          },
+          icon: {
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="12" fill="#f36f5e" stroke="white" stroke-width="2"/>
+              </svg>
+            `),
+            scaledSize: new window.google.maps.Size(32, 32),
+          }
+        })
+      })
+      
+      // Create directions service and renderer
+      const directionsService = new window.google.maps.DirectionsService()
+      const directionsRenderer = new window.google.maps.DirectionsRenderer({
+        suppressMarkers: true, // We're using custom markers
+        polylineOptions: {
+          strokeColor: '#f36f5e',
+          strokeWeight: 4,
+          strokeOpacity: 0.8,
+        }
+      })
+      
+      directionsRenderer.setMap(map)
+      
+      // Build waypoints (all stops except the last one)
+      const waypoints = selectedTour.stops.slice(0, -1).map(stop => ({
+        location: { lat: stop.latitude, lng: stop.longitude },
+        stopover: true,
+      }))
+      
+      // Request directions
+      const request = {
+        origin: { lat: Number(latitude), lng: Number(longitude) },
+        destination: { 
+          lat: selectedTour.stops[selectedTour.stops.length - 1].latitude, 
+          lng: selectedTour.stops[selectedTour.stops.length - 1].longitude 
+        },
+        waypoints: waypoints,
+        travelMode: window.google.maps.TravelMode.WALKING,
+      }
+      
+      directionsService.route(request, (result, status) => {
+        if (status === 'OK' && result) {
+          directionsRenderer.setDirections(result)
+          setMessage(`Map loaded for "${selectedTour.title}". Ready to explore!`)
+        } else {
+          console.error('Directions request failed:', status)
+          setMapError(`Failed to load walking directions: ${status}`)
+        }
+      })
+      
+    } catch (error) {
+      console.error('Error initializing map:', error)
+      setMapError(error instanceof Error ? error.message : 'Failed to initialize map')
+    }
+  }, [selectedTour, latitude, longitude])
+
+  // Add Google Maps script loading
+  useEffect(() => {
+    const loadGoogleMaps = () => {
+      if (window.google && window.google.maps) {
+        return Promise.resolve()
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script')
+        const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+        
+        if (!apiKey) {
+          reject(new Error('Google Maps API key not configured'))
+          return
+        }
+
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`
+        script.async = true
+        script.defer = true
+        
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error('Failed to load Google Maps'))
+        
+        document.head.appendChild(script)
+      })
+    }
+
+    // Load Google Maps when component mounts
+    loadGoogleMaps().catch(error => {
+      console.error('Error loading Google Maps:', error)
+    })
+  }, [])
 
   return (
     <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center justify-center px-4 py-10">
@@ -381,19 +621,60 @@ function App() {
               </div>
             </form>
           </>
-        ) : (
+        ) : view === 'tours' ? (
           <>
             <header className="mb-6 text-center">
               <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
                 Hear &amp; There
               </p>
-              <h1 className="text-3xl font-semibold text-slate-900 mb-2">Which tour do you prefer?</h1>
+              <h1 className="text-3xl font-semibold text-slate-900 mb-2">
+                {selectedTour ? selectedTour.title : 'Which tour do you prefer?'}
+              </h1>
               <p className="text-sm text-slate-600">
-                {neighborhood || city
-                  ? `Starting near ${neighborhood || city}.`
-                  : 'Here are a few routes based on your starting point.'}
+                {selectedTour ? selectedTour.abstract : (
+                  neighborhood || city
+                    ? `Starting near ${neighborhood || city}.`
+                    : 'Here are a few routes based on your starting point.'
+                )}
               </p>
             </header>
+
+            {/* Inline Map Section */}
+            {selectedTour && (
+              <div className="mb-6">
+                {mapError ? (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                    {mapError}
+                  </div>
+                ) : (
+                  <div 
+                    id="tour-map" 
+                    className="w-full h-80 rounded-xl border border-slate-200 bg-slate-100 mb-4"
+                  />
+                )}
+                
+                <div className="bg-slate-50 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
+                  <p className="text-xs text-slate-600 mb-3">
+                    ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
+                  </p>
+                  
+                  <ol className="space-y-2 text-xs text-slate-600">
+                    {selectedTour.stops.map((stop, idx) => (
+                      <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
+                        <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                        <span className="flex-1">
+                          {stop.name}{' '}
+                          <span className="text-slate-400">
+                            · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            )}
 
             {tours.length === 0 ? (
               <p className="text-sm text-slate-600">
@@ -442,10 +723,7 @@ function App() {
 
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedTourId(tour.id)
-                            setMessage(`You selected “${tour.title}”. (MVP: selection is logged only.)`)
-                          }}
+                          onClick={() => handleSelectTour(tour)}
                           className="inline-flex w-full items-center justify-center rounded-xl bg-[#f36f5e] px-3 py-2 text-xs font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
                         >
                           {selectedTourId === tour.id ? 'Selected' : 'Select this tour'}
@@ -455,22 +733,27 @@ function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-500">
+                <div className="flex items-center justify-center text-xs text-slate-500">
                   <button
                     type="button"
                     onClick={() => {
                       setView('form')
                       setTours([])
                       setSelectedTourId(null)
+                      setSelectedTour(null)
+                      setMapError(null)
                     }}
                     className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
                   >
-                    ← Back to inputs
+                    ← Start over
                   </button>
                 </div>
               </div>
             )}
           </>
+        ) : (
+          // Remove the separate map view since it's now inline
+          <div>Unknown view</div>
         )}
 
         {(status !== 'idle' || message) && (
