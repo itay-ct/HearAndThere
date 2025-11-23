@@ -788,46 +788,6 @@ async function appendMessagesToRedis({ redisClient, sessionKey, messages }) {
   await redisClient.rPush(listKey, ...messages.map((m) => JSON.stringify(m)));
 }
 
-async function persistCandidateTours({ redisClient, sessionKey, tours }) {
-  if (!redisClient || !sessionKey) return;
-  
-  console.log('[tourGeneration] persistCandidateTours: input tours count', Array.isArray(tours) ? tours.length : 0);
-  
-  const jsonKey = `${sessionKey}:candidate_tours`;
-  
-  try {
-    // Delete existing key first to avoid type conflicts
-    await redisClient.del(jsonKey);
-    
-    if (Array.isArray(tours) && tours.length) {
-      console.log('[tourGeneration] persistCandidateTours: persisting tours', tours.map(t => t.id || 'no-id'));
-      await redisClient.json.set(jsonKey, '$', tours);
-    } else {
-      await redisClient.json.set(jsonKey, '$', []);
-    }
-    
-    console.log('[tourGeneration] persistCandidateTours: completed');
-  } catch (err) {
-    console.warn('[tourGeneration] Failed to persist candidate tours', err);
-  }
-}
-
-async function loadCandidateTours({ redisClient, sessionKey }) {
-  if (!redisClient || !sessionKey) return [];
-  
-  const jsonKey = `${sessionKey}:candidate_tours`;
-  
-  try {
-    const tours = await redisClient.json.get(jsonKey, { path: '$' });
-    const result = Array.isArray(tours) && tours.length > 0 && Array.isArray(tours[0]) ? tours[0] : [];
-    console.log('[tourGeneration] loadCandidateTours: loaded', result.length, 'tours from Redis');
-    return result;
-  } catch (err) {
-    console.log('[tourGeneration] loadCandidateTours: no candidate tours found or error', err.message);
-    return [];
-  }
-}
-
 async function persistFinalTours({ redisClient, sessionKey, tours }) {
   if (!redisClient || !sessionKey) return;
   
@@ -860,13 +820,12 @@ async function persistFinalTours({ redisClient, sessionKey, tours }) {
 
 async function cleanupRedisKeys({ redisClient, sessionKey }) {
   if (!redisClient || !sessionKey) return;
-  
+
   try {
     // Delete potentially conflicting keys
     const keysToDelete = [
       `${sessionKey}:pois`,
       `${sessionKey}:summaries`,
-      `${sessionKey}:candidate_tours`,
       `${sessionKey}:tours`
     ];
     
