@@ -1097,13 +1097,38 @@ async function validateWalkingTimes(tours, startLatitude, startLongitude, redisC
           walkMinutesFromPrevious_llm: stop.walkMinutesFromPrevious // Save original LLM estimate
         };
 
-        // Get Google Maps walking time for this leg
+        // Get Google Maps walking time and directions for this leg
         const leg = legs[index];
         const googleWalkingSeconds = leg.duration?.value || 0;
         const googleWalkingMinutes = Math.ceil(googleWalkingSeconds / 60);
-        
+        const distanceMeters = leg.distance?.value || 0;
+
         updatedStop.walkMinutesFromPrevious = googleWalkingMinutes;
-        
+        updatedStop.distanceMeters = distanceMeters;
+
+        // Extract walking directions with street names
+        if (leg.steps && leg.steps.length > 0) {
+          updatedStop.walkingDirections = leg.steps.map(step => ({
+            instruction: step.html_instructions?.replace(/<[^>]*>/g, '') || '', // Strip HTML tags
+            distance: step.distance?.text || '',
+            duration: step.duration?.text || '',
+          }));
+
+          // Extract street names from the steps
+          const streetNames = leg.steps
+            .map(step => {
+              const instruction = step.html_instructions || '';
+              // Try to extract street names from instructions
+              const match = instruction.match(/on\s+<b>([^<]+)<\/b>/i) ||
+                           instruction.match(/onto\s+<b>([^<]+)<\/b>/i) ||
+                           instruction.match(/toward\s+<b>([^<]+)<\/b>/i);
+              return match ? match[1] : null;
+            })
+            .filter(Boolean);
+
+          updatedStop.streetNames = [...new Set(streetNames)]; // Remove duplicates
+        }
+
         llmTotalWalkingMinutes += stop.walkMinutesFromPrevious || 0;
         googleTotalWalkingMinutes += googleWalkingMinutes;
 

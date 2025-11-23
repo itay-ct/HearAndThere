@@ -15,6 +15,11 @@ node_modules/
 *.pem
 config/secrets.json
 
+# Google Cloud Service Account credentials - NEVER commit these!
+*-*.json
+!package.json
+!package-lock.json
+
 # Build outputs
 dist/
 build/

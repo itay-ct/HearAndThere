@@ -4,9 +4,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
-const FRONTEND_VERSION = '1.0.6'; // Update this with each commit
-
-type View = 'form' | 'tours'
+const FRONTEND_VERSION = '1.0.8'; // Update this with each commit
 
 type TourStop = {
   name: string
@@ -34,15 +32,21 @@ function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [message, setMessage] = useState<string>('')
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [view, setView] = useState<View>('form')
   const [tours, setTours] = useState<Tour[]>([])
   const [city, setCity] = useState<string | null>(null)
   const [neighborhood, setNeighborhood] = useState<string | null>(null)
   const [selectedTourId, setSelectedTourId] = useState<string | null>(null)
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [audioguideGenerating, setAudioguideGenerating] = useState<boolean>(false)
+  const [audioguideData, setAudioguideData] = useState<any>(null)
+  const [audioguideError, setAudioguideError] = useState<string | null>(null)
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
+  const [toursGenerated, setToursGenerated] = useState<boolean>(false)
 
   const progressIntervalRef = useRef<number | null>(null)
+  const audioguidePollingRef = useRef<number | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const stopProgressPolling = useCallback(() => {
     if (progressIntervalRef.current !== null) {
@@ -234,15 +238,12 @@ function App() {
       setNeighborhood(data.neighborhood ?? null)
       setTours(hasTours ? (data.tours as Tour[]) : [])
       setSelectedTourId(null)
+      setToursGenerated(hasTours)
       setMessage(
         hasTours
           ? mapStageToMessage('tours_ranked', data.tours.length)
           : 'Session saved! Your journey is being prepared.',
       )
-
-      if (hasTours) {
-        setView('tours')
-      }
     } catch (error) {
       stopProgressPolling()
 
@@ -269,14 +270,14 @@ function App() {
   const handleSelectTour = useCallback(async (tour: Tour) => {
     setSelectedTourId(tour.id)
     setSelectedTour(tour)
-    setMessage(`Loading map for "${tour.title}"...`)
-    
+    setMessage(`Tour selected: "${tour.title}"`)
+
     try {
       // Check if Google Maps is loaded
       if (!window.google || !window.google.maps) {
         throw new Error('Google Maps not loaded')
       }
-      
+
       setMapError(null)
       // Stay on tours view, map will render inline
     } catch (error) {
@@ -286,91 +287,134 @@ function App() {
     }
   }, [])
 
-  const renderMapView = () => {
-    if (!selectedTour) return null
-    
-    return (
-      <>
-        <header className="mb-6 text-center">
-          <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
-            Hear &amp; There
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h1>
-          <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
-        </header>
+  const stopAudioguidePolling = useCallback(() => {
+    if (audioguidePollingRef.current !== null) {
+      window.clearInterval(audioguidePollingRef.current)
+      audioguidePollingRef.current = null
+    }
+  }, [])
 
-        {mapError ? (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            {mapError}
-          </div>
-        ) : (
-          <div className="mb-6">
-            <div 
-              id="tour-map" 
-              className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100"
-            />
-          </div>
-        )}
+  const startAudioguidePolling = useCallback((sessionIdForPolling: string, tourIdForPolling: string) => {
+    if (!sessionIdForPolling || !tourIdForPolling) return
 
-        <div className="space-y-4">
-          <div className="bg-slate-50 rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
-            <p className="text-xs text-slate-600 mb-3">
-              ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
-            </p>
-            
-            <ol className="space-y-2 text-xs text-slate-600">
-              {selectedTour.stops.map((stop, idx) => (
-                <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
-                  <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                  <span className="flex-1">
-                    {stop.name}{' '}
-                    <span className="text-slate-400">
-                      · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </div>
+    stopAudioguidePolling()
 
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <button
-              type="button"
-              onClick={() => {
-                setView('tours')
-                setSelectedTour(null)
-                setMapError(null)
-              }}
-              className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
-            >
-              ← Back to tours
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => {
-                setView('form')
-                setTours([])
-                setSelectedTourId(null)
-                setSelectedTour(null)
-                setMapError(null)
-              }}
-              className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
-            >
-              Start over
-            </button>
-          </div>
-        </div>
-      </>
-    )
-  }
+    audioguidePollingRef.current = window.setInterval(async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/session/${sessionIdForPolling}/tour/${tourIdForPolling}/audioguide`
+        )
+
+        if (!res.ok) {
+          if (res.status === 404) {
+            // Not found yet, keep polling
+            return
+          }
+          console.error('Audioguide polling HTTP error:', res.status)
+          return
+        }
+
+        const data = await res.json()
+        console.log('Audioguide status:', data.status)
+
+        if (data.status === 'complete') {
+          setAudioguideData(data)
+          setAudioguideGenerating(false)
+          setAudioguideError(null)
+          setMessage('Audioguide ready! Click play to listen.')
+          stopAudioguidePolling()
+        } else if (data.status === 'failed') {
+          setAudioguideGenerating(false)
+          setAudioguideError(data.error || 'Audioguide generation failed. Please try again.')
+          setMessage('Audioguide generation failed.')
+          stopAudioguidePolling()
+        }
+      } catch (err) {
+        console.error('Audioguide polling failed:', err)
+      }
+    }, 2000) // Poll every 2 seconds
+  }, [stopAudioguidePolling])
+
+  const handleGenerateAudioguide = useCallback(async () => {
+    if (!sessionId || !selectedTour) return
+
+    setAudioguideGenerating(true)
+    setAudioguideData(null)
+    setAudioguideError(null)
+    setMessage('Generating audioguide scripts and audio files...')
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/session/${sessionId}/tour/${selectedTour.id}/audioguide`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      const data = await response.json()
+      console.log('Audioguide generation started:', data)
+      setMessage('Audioguide generation in progress...')
+
+      // Start polling for status
+      startAudioguidePolling(sessionId, selectedTour.id)
+    } catch (error) {
+      console.error('Failed to start audioguide generation:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start audioguide generation'
+      setAudioguideError(errorMessage)
+      setMessage('Failed to start audioguide generation')
+      setAudioguideGenerating(false)
+    }
+  }, [sessionId, selectedTour, startAudioguidePolling])
+
+  const handlePlayAudio = useCallback((audioUrl: string, audioId: string) => {
+    // Stop currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+
+    // If clicking the same audio, just pause
+    if (playingAudioId === audioId) {
+      setPlayingAudioId(null)
+      return
+    }
+
+    // Play new audio - audioUrl is already a full GCS URL
+    const audio = new Audio(audioUrl)
+    audio.play()
+    audioRef.current = audio
+    setPlayingAudioId(audioId)
+
+    audio.onended = () => {
+      setPlayingAudioId(null)
+      audioRef.current = null
+    }
+  }, [playingAudioId])
+
+  const handlePauseAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    setPlayingAudioId(null)
+  }, [])
 
   useEffect(() => {
     return () => {
       stopProgressPolling()
+      stopAudioguidePolling()
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
     }
-  }, [stopProgressPolling])
+  }, [stopProgressPolling, stopAudioguidePolling])
 
   useEffect(() => {
     if (status === 'success' || status === 'error') {
@@ -381,12 +425,12 @@ function App() {
     }
   }, [status])
 
-  // Add effect to initialize map when map view loads
+  // Add effect to initialize map when tour is selected
   useEffect(() => {
-    if (view === 'tours' && selectedTour && window.google && window.google.maps) {
+    if (selectedTour && window.google && window.google.maps) {
       initializeMap()
     }
-  }, [view, selectedTour])
+  }, [selectedTour])
 
   // Add map initialization function
   const initializeMap = useCallback(async () => {
@@ -521,19 +565,19 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center justify-center px-4 py-10">
-      <div className="w-full max-w-xl rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-        {view === 'form' ? (
-          <>
-            <header className="mb-8 text-center">
-              <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
-                Hear &amp; There
-              </p>
-              <h1 className="text-3xl font-semibold text-slate-900 mb-2">Start Your Tour</h1>
-              <p className="text-sm text-slate-600">Where are you starting from?</p>
-            </header>
+    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
+      <div className="w-full max-w-2xl space-y-6">
+        {/* STEP 1: Input Form */}
+        <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50' : ''}`}>
+          <header className="mb-8 text-center">
+            <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
+              Hear &amp; There
+            </p>
+            <h1 className="text-3xl font-semibold text-slate-900 mb-2">Start Your Tour</h1>
+            <p className="text-sm text-slate-600">Where are you starting from?</p>
+          </header>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
               <section>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-semibold text-slate-800">Your location</h2>
@@ -620,68 +664,26 @@ function App() {
                 </div>
               </div>
             </form>
-          </>
-        ) : view === 'tours' ? (
-          <>
+          </div>
+
+        {/* STEP 2: Tour Selection */}
+        {toursGenerated && tours.length > 0 && (
+          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${selectedTour ? 'opacity-50' : ''}`}>
             <header className="mb-6 text-center">
               <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
                 Hear &amp; There
               </p>
               <h1 className="text-3xl font-semibold text-slate-900 mb-2">
-                {selectedTour ? selectedTour.title : 'Which tour do you prefer?'}
+                Choose Your Tour
               </h1>
               <p className="text-sm text-slate-600">
-                {selectedTour ? selectedTour.abstract : (
-                  neighborhood || city
-                    ? `Starting near ${neighborhood || city}.`
-                    : 'Here are a few routes based on your starting point.'
-                )}
+                {neighborhood || city
+                  ? `Starting near ${neighborhood || city}.`
+                  : 'Here are a few routes based on your starting point.'}
               </p>
             </header>
 
-            {/* Inline Map Section */}
-            {selectedTour && (
-              <div className="mb-6">
-                {mapError ? (
-                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-                    {mapError}
-                  </div>
-                ) : (
-                  <div 
-                    id="tour-map" 
-                    className="w-full h-80 rounded-xl border border-slate-200 bg-slate-100 mb-4"
-                  />
-                )}
-                
-                <div className="bg-slate-50 rounded-xl p-4">
-                  <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
-                  <p className="text-xs text-slate-600 mb-3">
-                    ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
-                  </p>
-                  
-                  <ol className="space-y-2 text-xs text-slate-600">
-                    {selectedTour.stops.map((stop, idx) => (
-                      <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
-                        <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                        <span className="flex-1">
-                          {stop.name}{' '}
-                          <span className="text-slate-400">
-                            · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
-                          </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </div>
-            )}
-
-            {tours.length === 0 ? (
-              <p className="text-sm text-slate-600">
-                No tours were generated yet. You can go back and try again.
-              </p>
-            ) : (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 <div className="-mx-4 overflow-x-auto pb-2">
                   <div className="flex gap-4 px-1">
                     {tours.map((tour) => (
@@ -733,29 +735,179 @@ function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-center text-xs text-slate-500">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setView('form')
-                      setTours([])
-                      setSelectedTourId(null)
-                      setSelectedTour(null)
-                      setMapError(null)
-                    }}
-                    className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
-                  >
-                    ← Start over
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          // Remove the separate map view since it's now inline
-          <div>Unknown view</div>
+            </div>
+          </div>
         )}
 
+        {/* STEP 3: Map View */}
+        {selectedTour && (
+          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${audioguideData || audioguideGenerating || audioguideError ? 'opacity-50' : ''}`}>
+            <header className="mb-6 text-center">
+              <h2 className="text-2xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h2>
+              <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
+            </header>
+
+            {mapError ? (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                {mapError}
+              </div>
+            ) : (
+              <div
+                id="tour-map"
+                className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100 mb-6"
+              />
+            )}
+
+            <div className="bg-slate-50 rounded-xl p-4 mb-6">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
+              <p className="text-xs text-slate-600 mb-3">
+                ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
+              </p>
+
+              <ol className="space-y-2 text-xs text-slate-600">
+                {selectedTour.stops.map((stop, idx) => (
+                  <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
+                    <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                    <span className="flex-1">
+                      {stop.name}{' '}
+                      <span className="text-slate-400">
+                        · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* STEP 4: Generate Audioguide Button */}
+            {!audioguideData && !audioguideGenerating && !audioguideError && (
+              <button
+                type="button"
+                onClick={handleGenerateAudioguide}
+                className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+              >
+                🎧 Generate Audioguide
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* STEP 5: Audioguide Status/Player */}
+        {selectedTour && audioguideGenerating && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
+              <h3 className="text-sm font-semibold text-sky-900 mb-4">
+                🎧 Generating Audioguide
+              </h3>
+              <p className="text-xs text-sky-700 mb-4">
+                Creating engaging narration for your tour. This may take a few minutes...
+              </p>
+              <div className="flex items-center gap-3 text-xs">
+                <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-sky-700">Generating scripts and audio...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedTour && audioguideError && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6">
+              <h3 className="text-sm font-semibold text-red-900 mb-4">
+                ❌ Audioguide Generation Failed
+              </h3>
+              <p className="text-xs text-red-700 mb-4">
+                {audioguideError}
+              </p>
+              <button
+                type="button"
+                onClick={handleGenerateAudioguide}
+                className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        )}
+
+        {selectedTour && audioguideData && audioguideData.audioFiles && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6">
+              <h3 className="text-sm font-semibold text-emerald-900 mb-4">
+                🎧 Audioguide Ready
+              </h3>
+              <p className="text-xs text-emerald-700 mb-4">
+                Your personalized audioguide is ready. Click play to listen to each segment.
+              </p>
+
+              <div className="space-y-3">
+                {/* Introduction */}
+                {audioguideData.audioFiles.intro && audioguideData.audioFiles.intro.url && (
+                  <div className="bg-white rounded-xl p-4 border border-emerald-100">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1">
+                        <h4 className="text-xs font-semibold text-slate-900 mb-1">
+                          Introduction
+                        </h4>
+                        <p className="text-[11px] text-slate-600">
+                          Welcome and tour overview
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          playingAudioId === 'intro'
+                            ? handlePauseAudio()
+                            : handlePlayAudio(audioguideData.audioFiles.intro.url, 'intro')
+                        }
+                        className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500 text-white hover:bg-emerald-600 transition"
+                      >
+                        {playingAudioId === 'intro' ? '⏸' : '▶'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Stops */}
+                {audioguideData.audioFiles.stops && audioguideData.audioFiles.stops.map((stopAudio: any, index: number) => {
+                  if (!stopAudio || !stopAudio.url) return null
+                  const stop = selectedTour.stops[index]
+                  if (!stop) return null
+
+                  const audioId = `stop-${index}`
+
+                  return (
+                    <div key={audioId} className="bg-white rounded-xl p-4 border border-emerald-100">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1">
+                          <h4 className="text-xs font-semibold text-slate-900 mb-1">
+                            Stop {index + 1}: {stop.name}
+                          </h4>
+                          <p className="text-[11px] text-slate-600">
+                            Historical facts and stories
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            playingAudioId === audioId
+                              ? handlePauseAudio()
+                              : handlePlayAudio(stopAudio.url, audioId)
+                          }
+                          className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500 text-white hover:bg-emerald-600 transition"
+                        >
+                          {playingAudioId === audioId ? '⏸' : '▶'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Message */}
         {(status !== 'idle' || message) && (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-700">
             {message && <p className="mb-1">{message}</p>}
@@ -768,6 +920,8 @@ function App() {
         )}
         <p className="text-xs text-slate-300 font-light">v{FRONTEND_VERSION}</p>
       </div>
+
+
     </div>
   )
 }

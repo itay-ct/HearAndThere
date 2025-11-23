@@ -5,6 +5,7 @@ import { createClient } from 'redis';
 import { v4 as uuidv4 } from 'uuid';
 import { readFileSync } from 'fs';
 import { generateTours } from './tourGeneration.js';
+import { generateAudioguide } from './audioguideGeneration.js';
 
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 const { version } = packageJson;
@@ -53,6 +54,9 @@ async function start() {
     credentials: true
   }));
   app.use(express.json());
+
+  // Audio files are now served from Google Cloud Storage
+  // No need for local static file serving
 
   app.get('/health', async (req, res) => {
     try {
@@ -199,6 +203,154 @@ async function start() {
     } catch (err) {
       console.error('Error reading session progress', err);
       res.status(500).json({ error: 'failed-to-read-session-progress' });
+    }
+  });
+
+  // Generate audioguide for a specific tour
+  app.post('/api/session/:sessionId/tour/:tourId/audioguide', async (req, res) => {
+    const { sessionId, tourId } = req.params;
+
+    if (!sessionId || !tourId) {
+      return res.status(400).json({ error: 'sessionId and tourId are required' });
+    }
+
+    const key = `session:${sessionId}`;
+
+    try {
+      // Load session data
+      const sessionData = await redisClient.hGetAll(key);
+      if (!sessionData || Object.keys(sessionData).length === 0) {
+        return res.status(404).json({ error: 'session-not-found' });
+      }
+
+      // Parse tours
+      let tours = [];
+      if (sessionData.tours) {
+        try {
+          tours = JSON.parse(sessionData.tours);
+        } catch (err) {
+          console.error('Failed to parse tours', err);
+          return res.status(500).json({ error: 'invalid-tour-data' });
+        }
+      }
+
+      // Find the selected tour
+      const selectedTour = tours.find(t => t.id === tourId);
+      if (!selectedTour) {
+        return res.status(404).json({ error: 'tour-not-found' });
+      }
+
+      // Build area context from session data
+      const areaContext = {
+        city: sessionData.city || null,
+        neighborhood: sessionData.neighborhood || null,
+        cityData: { summary: null, keyFacts: null },
+        neighborhoodData: { summary: null, keyFacts: null },
+      };
+
+      // Mark audioguide as generating
+      const audioguideKey = `audioguide:${sessionId}:${tourId}`;
+      await redisClient.hSet(audioguideKey, {
+        status: 'generating',
+        startedAt: new Date().toISOString(),
+      });
+
+      // Start audioguide generation (async)
+      console.log('[api] Starting audioguide generation for tour:', tourId);
+
+      // Return immediately with accepted status
+      res.status(202).json({
+        sessionId,
+        tourId,
+        status: 'generating',
+        message: 'Audioguide generation started',
+      });
+
+      // Generate audioguide in background
+      generateAudioguide({
+        sessionId,
+        tourId,
+        selectedTour,
+        areaContext,
+        redisClient,
+      }).then(async (result) => {
+        console.log('[api] Audioguide generation completed for tour:', tourId);
+
+        // Store the result in Redis
+        await redisClient.hSet(audioguideKey, {
+          status: 'complete',
+          completedAt: new Date().toISOString(),
+        });
+
+        // Store scripts and audio files as JSON
+        if (result.scripts) {
+          await redisClient.json.set(`${audioguideKey}:scripts`, '$', result.scripts);
+        }
+        if (result.audioFiles) {
+          await redisClient.json.set(`${audioguideKey}:audioFiles`, '$', result.audioFiles);
+        }
+
+        console.log('[api] Audioguide data saved to Redis');
+      }).catch(async (err) => {
+        console.error('[api] Audioguide generation failed for tour:', tourId, err);
+
+        // Mark as failed
+        await redisClient.hSet(audioguideKey, {
+          status: 'failed',
+          error: err.message,
+          failedAt: new Date().toISOString(),
+        });
+      });
+
+    } catch (err) {
+      console.error('Error starting audioguide generation', err);
+      res.status(500).json({ error: 'failed-to-start-audioguide-generation' });
+    }
+  });
+
+  // Get audioguide status and data
+  app.get('/api/session/:sessionId/tour/:tourId/audioguide', async (req, res) => {
+    const { sessionId, tourId } = req.params;
+
+    if (!sessionId || !tourId) {
+      return res.status(400).json({ error: 'sessionId and tourId are required' });
+    }
+
+    const audioguideKey = `audioguide:${sessionId}:${tourId}`;
+
+    try {
+      const audioguideData = await redisClient.hGetAll(audioguideKey);
+
+      if (!audioguideData || Object.keys(audioguideData).length === 0) {
+        return res.status(404).json({ error: 'audioguide-not-found' });
+      }
+
+      const response = {
+        sessionId,
+        tourId,
+        status: audioguideData.status || 'unknown',
+        startedAt: audioguideData.startedAt || null,
+        completedAt: audioguideData.completedAt || null,
+        error: audioguideData.error || null,
+      };
+
+      // If complete, load scripts and audio files
+      if (audioguideData.status === 'complete') {
+        try {
+          const scriptsData = await redisClient.json.get(`${audioguideKey}:scripts`, { path: '$' });
+          const audioFilesData = await redisClient.json.get(`${audioguideKey}:audioFiles`, { path: '$' });
+
+          response.scripts = Array.isArray(scriptsData) && scriptsData.length > 0 ? scriptsData[0] : null;
+          response.audioFiles = Array.isArray(audioFilesData) && audioFilesData.length > 0 ? audioFilesData[0] : null;
+        } catch (err) {
+          console.warn('[api] Failed to load audioguide data from Redis', err);
+        }
+      }
+
+      res.json(response);
+    } catch (err) {
+      console.error('Error fetching audioguide status', err);
+      res.status(500).json({ error: 'failed-to-fetch-audioguide-status' });
     }
   });
 
