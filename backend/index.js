@@ -80,6 +80,8 @@ async function start() {
       longitude,
       durationMinutes,
       sessionId: clientSessionId,
+      customization,
+      language,
     } = req.body || {};
 
     if (
@@ -104,15 +106,22 @@ async function start() {
       latitude,
       longitude,
       durationMinutes,
+      customization,
+      language,
     });
 
     try {
-      await redisClient.hSet(key, {
+      const sessionData = {
         latitude: String(latitude),
         longitude: String(longitude),
         durationMinutes: String(durationMinutes),
         createdAt: String(createdAt),
-      });
+      };
+
+      if (customization) sessionData.customization = customization;
+      if (language) sessionData.language = language;
+
+      await redisClient.hSet(key, sessionData);
 
       let city = null;
       let neighborhood = null;
@@ -124,6 +133,8 @@ async function start() {
           latitude,
           longitude,
           durationMinutes,
+          customization,
+          language,
           redisClient,
         });
         city = result.city || null;
@@ -248,20 +259,37 @@ async function start() {
         neighborhoodData: { summary: null, keyFacts: null },
       };
 
-      // Mark audioguide as generating
-      const audioguideKey = `audioguide:${sessionId}:${tourId}`;
-      await redisClient.hSet(audioguideKey, {
+      // Get language preference from session
+      const language = sessionData.language || 'english';
+
+      // Generate a unique shareable tour ID (independent of session)
+      const shareableTourId = uuidv4();
+      console.log('[api] Generated shareable tour ID:', shareableTourId);
+
+      // Store tour data under the shareable tour ID
+      const tourDataKey = `tour:${shareableTourId}`;
+      await redisClient.hSet(tourDataKey, {
+        tourId: shareableTourId,
+        sessionId, // Keep reference for debugging
+        originalTourId: tourId,
         status: 'generating',
         startedAt: new Date().toISOString(),
+        title: selectedTour.title,
+        abstract: selectedTour.abstract,
+        theme: selectedTour.theme,
+        estimatedTotalMinutes: selectedTour.estimatedTotalMinutes,
+        language,
+        tourData: JSON.stringify(selectedTour),
+        areaContext: JSON.stringify(areaContext),
       });
 
       // Start audioguide generation (async)
-      console.log('[api] Starting audioguide generation for tour:', tourId);
+      console.log('[api] Starting audioguide generation for shareable tour:', shareableTourId, 'language:', language);
 
-      // Return immediately with accepted status
+      // Return immediately with the shareable tour ID
       res.status(202).json({
         sessionId,
-        tourId,
+        tourId: shareableTourId, // Return the shareable tour ID
         status: 'generating',
         message: 'Audioguide generation started',
       });
@@ -269,33 +297,34 @@ async function start() {
       // Generate audioguide in background
       generateAudioguide({
         sessionId,
-        tourId,
+        tourId: shareableTourId, // Pass shareable tour ID
         selectedTour,
         areaContext,
+        language,
         redisClient,
       }).then(async (result) => {
-        console.log('[api] Audioguide generation completed for tour:', tourId);
+        console.log('[api] Audioguide generation completed for tour:', shareableTourId);
 
         // Store the result in Redis
-        await redisClient.hSet(audioguideKey, {
+        await redisClient.hSet(tourDataKey, {
           status: 'complete',
           completedAt: new Date().toISOString(),
         });
 
         // Store scripts and audio files as JSON
         if (result.scripts) {
-          await redisClient.json.set(`${audioguideKey}:scripts`, '$', result.scripts);
+          await redisClient.json.set(`${tourDataKey}:scripts`, '$', result.scripts);
         }
         if (result.audioFiles) {
-          await redisClient.json.set(`${audioguideKey}:audioFiles`, '$', result.audioFiles);
+          await redisClient.json.set(`${tourDataKey}:audioFiles`, '$', result.audioFiles);
         }
 
-        console.log('[api] Audioguide data saved to Redis');
+        console.log('[api] Audioguide data saved to Redis for shareable tour:', shareableTourId);
       }).catch(async (err) => {
-        console.error('[api] Audioguide generation failed for tour:', tourId, err);
+        console.error('[api] Audioguide generation failed for tour:', shareableTourId, err);
 
         // Mark as failed
-        await redisClient.hSet(audioguideKey, {
+        await redisClient.hSet(tourDataKey, {
           status: 'failed',
           error: err.message,
           failedAt: new Date().toISOString(),
@@ -308,7 +337,7 @@ async function start() {
     }
   });
 
-  // Get audioguide status and data
+  // Get audioguide status and data (legacy endpoint - kept for backward compatibility)
   app.get('/api/session/:sessionId/tour/:tourId/audioguide', async (req, res) => {
     const { sessionId, tourId } = req.params;
 
@@ -351,6 +380,73 @@ async function start() {
     } catch (err) {
       console.error('Error fetching audioguide status', err);
       res.status(500).json({ error: 'failed-to-fetch-audioguide-status' });
+    }
+  });
+
+  // Get shareable tour data by tour ID
+  app.get('/api/tour/:tourId', async (req, res) => {
+    const { tourId } = req.params;
+
+    if (!tourId) {
+      return res.status(400).json({ error: 'tourId is required' });
+    }
+
+    const tourDataKey = `tour:${tourId}`;
+
+    try {
+      const tourData = await redisClient.hGetAll(tourDataKey);
+
+      if (!tourData || Object.keys(tourData).length === 0) {
+        return res.status(404).json({ error: 'tour-not-found' });
+      }
+
+      const response = {
+        tourId,
+        status: tourData.status || 'unknown',
+        title: tourData.title || null,
+        abstract: tourData.abstract || null,
+        theme: tourData.theme || null,
+        estimatedTotalMinutes: tourData.estimatedTotalMinutes ? parseInt(tourData.estimatedTotalMinutes) : null,
+        language: tourData.language || 'english',
+        startedAt: tourData.startedAt || null,
+        completedAt: tourData.completedAt || null,
+        error: tourData.error || null,
+      };
+
+      // Parse tour data and area context
+      if (tourData.tourData) {
+        try {
+          response.tour = JSON.parse(tourData.tourData);
+        } catch (err) {
+          console.warn('[api] Failed to parse tour data', err);
+        }
+      }
+
+      if (tourData.areaContext) {
+        try {
+          response.areaContext = JSON.parse(tourData.areaContext);
+        } catch (err) {
+          console.warn('[api] Failed to parse area context', err);
+        }
+      }
+
+      // If complete, load scripts and audio files
+      if (tourData.status === 'complete') {
+        try {
+          const scriptsData = await redisClient.json.get(`${tourDataKey}:scripts`, { path: '$' });
+          const audioFilesData = await redisClient.json.get(`${tourDataKey}:audioFiles`, { path: '$' });
+
+          response.scripts = Array.isArray(scriptsData) && scriptsData.length > 0 ? scriptsData[0] : null;
+          response.audioFiles = Array.isArray(audioFilesData) && audioFilesData.length > 0 ? audioFilesData[0] : null;
+        } catch (err) {
+          console.warn('[api] Failed to load audioguide data from Redis', err);
+        }
+      }
+
+      res.json(response);
+    } catch (err) {
+      console.error('Error fetching tour data', err);
+      res.status(500).json({ error: 'failed-to-fetch-tour-data' });
     }
   });
 

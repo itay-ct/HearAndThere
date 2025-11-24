@@ -13,7 +13,7 @@ console.log('[tourGeneration] LangSmith config check:', {
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const WIKIPEDIA_MCP_BASE_URL = process.env.WIKIPEDIA_MCP_BASE_URL;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 // Add this debug log right after the constants
@@ -199,14 +199,25 @@ async function cachePlaceInRedis(redisClient, place) {
   }
 }
 
-async function searchNearbyPois(latitude, longitude, redisClient = null) {
+async function searchNearbyPois(latitude, longitude, durationMinutes = 90, redisClient = null) {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[tourGeneration] GOOGLE_MAPS_API_KEY is not set; skipping POI search.');
     debugLog('searchNearbyPois: missing GOOGLE_MAPS_API_KEY');
     return [];
   }
 
-  const radiusMeters = 1500;
+  // Calculate dynamic radius based on available time
+  // Assume average walking speed of 5 km/h (83 m/min)
+  // Use 40% of time for walking to allow for dwell time
+  const walkingTimeMinutes = durationMinutes * 0.4;
+  const maxWalkingMeters = walkingTimeMinutes * 83; // meters per minute
+  // Radius should be roughly half the max walking distance (to allow for return)
+  const calculatedRadius = Math.round(maxWalkingMeters / 2);
+  // Clamp between 500m and 3000m for reasonable results
+  const radiusMeters = Math.max(500, Math.min(3000, calculatedRadius));
+
+  console.log(`[tourGeneration] POI search radius: ${radiusMeters}m (based on ${durationMinutes} min tour)`);
+
   
   const primaryTypes = [
   'historical_place',
@@ -429,13 +440,13 @@ async function generateNeighborhoodSummary(neighborhood, city) {
   return { summary: null, keyFacts: null };
 }
 
-async function buildAreaContext({ latitude, longitude, redisClient = null }) {
-  debugLog('buildAreaContext: start', { latitude, longitude });
-  
+async function buildAreaContext({ latitude, longitude, durationMinutes, redisClient = null }) {
+  debugLog('buildAreaContext: start', { latitude, longitude, durationMinutes });
+
   // Run geocoding and POI search in parallel
   const [{ city, neighborhood }, pois] = await Promise.all([
     reverseGeocode(latitude, longitude),
-    searchNearbyPois(latitude, longitude, redisClient), // Pass redisClient
+    searchNearbyPois(latitude, longitude, durationMinutes, redisClient), // Pass durationMinutes and redisClient
   ]);
 
   // Run city and neighborhood summaries in parallel
@@ -528,7 +539,7 @@ function heuristicToursFromPois({ latitude, longitude, durationMinutes, city, po
   });
 }
 
-async function generateToursWithGemini({ latitude, longitude, durationMinutes, city, neighborhood, pois, cityData, neighborhoodData }) {
+async function generateToursWithGemini({ latitude, longitude, durationMinutes, customization, language, city, neighborhood, pois, cityData, neighborhoodData }) {
   const fallback = () =>
     heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
 
@@ -545,6 +556,14 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     return fallback();
   }
 
+  const languageInstruction = language === 'hebrew'
+    ? 'Generate all tour titles, abstracts, themes, and stop names in HEBREW (עברית).'
+    : 'Generate all tour titles, abstracts, themes, and stop names in ENGLISH.';
+
+  const customizationInstruction = customization
+    ? `User customization request: "${customization}". Please incorporate this preference into the tour themes and stop selection.`
+    : '';
+
   const systemPrompt = [
     'You are a tour-planning assistant with access to real-time Google Maps data.',
     'Use Google Maps to find actual places, verify locations, and calculate real walking distances.',
@@ -553,7 +572,11 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     'Calculate accurate walking times between actual coordinates.',
     'Given a starting point, nearby points of interest, and context,',
     'propose around 10 candidate walking tours with clear themes.',
-    'Each tour must fit roughly within the requested total minutes.',
+    `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
+    'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
+    `Target tours between ${Math.round(durationMinutes * 0.8)} and ${durationMinutes} minutes.`,
+    languageInstruction,
+    customizationInstruction,
     'Respond strictly as JSON with a top-level "tours" array.',
     'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
     'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
@@ -577,6 +600,8 @@ async function generateToursWithGemini({ latitude, longitude, durationMinutes, c
     pois: poisForLLM, // Use cleaned POI data without place_id
     cityData,
     neighborhoodData,
+    customization: customization || null,
+    language: language || 'english',
   };
 
   const input = [
@@ -818,7 +843,7 @@ async function cleanupRedisKeys({ redisClient, sessionKey }) {
   }
 }
 
-async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes, redisClient }) {
+async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes, customization, language, redisClient }) {
   const modules = await getLangGraphModules();
   if (!modules) {
     throw new Error('LangGraph modules not available');
@@ -828,7 +853,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
 
   // Use Annotation.Root to extend MessagesAnnotation
   const { Annotation } = await import('@langchain/langgraph');
-  
+
   const TourState = Annotation.Root({
     ...MessagesAnnotation.spec,
     areaContext: Annotation({
@@ -849,7 +874,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     const messages = Array.isArray(state.messages) ? state.messages : [];
     let areaContext;
     try {
-      areaContext = await buildAreaContext({ latitude, longitude, redisClient });
+      areaContext = await buildAreaContext({ latitude, longitude, durationMinutes, redisClient });
     } catch (err) {
       console.warn('[tourGeneration] buildAreaContext failed in collectContextNode', err);
       areaContext = {
@@ -889,6 +914,8 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       latitude,
       longitude,
       durationMinutes,
+      customization,
+      language,
       city: areaContext.city,
       neighborhood: areaContext.neighborhood,
       pois: areaContext.pois,
@@ -914,25 +941,41 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   const validateWalkingTimesNode = async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
     const tours = state.candidateTours || [];
-    
+
     if (!tours.length) {
       console.warn('[tourGeneration] No tours to validate walking times for');
       return { messages };
     }
-    
+
     console.log('[tourGeneration] validateWalkingTimesNode: validating', tours.length, 'tours');
-    
+
     // Pass latitude and longitude to validateWalkingTimes
     const validatedTours = await validateWalkingTimes(tours, latitude, longitude, redisClient);
-    
+
+    // Filter tours that deviate by more than 30 minutes from requested duration
+    const filteredTours = validatedTours.filter(tour => {
+      const deviation = Math.abs(tour.estimatedTotalMinutes - durationMinutes);
+      const withinThreshold = deviation <= 30;
+
+      if (!withinThreshold) {
+        console.log(`[tourGeneration] Filtering out tour "${tour.title}" - deviation: ${deviation} min (requested: ${durationMinutes}, actual: ${tour.estimatedTotalMinutes})`);
+      }
+
+      return withinThreshold;
+    });
+
+    console.log(`[tourGeneration] After 30-min threshold filter: ${filteredTours.length}/${validatedTours.length} tours remain`);
+
     const msg = {
       role: 'system',
-      content: `Validated walking times for ${validatedTours.length} tours using Google Maps.`,
+      content: filteredTours.length > 0
+        ? `Validated walking times for ${validatedTours.length} tours, ${filteredTours.length} within 30-min threshold.`
+        : `Validated ${validatedTours.length} tours but none fit within 30 minutes of requested ${durationMinutes} min duration.`,
     };
 
-    return { 
+    return {
       messages: [...messages, msg],
-      finalTours: validatedTours
+      finalTours: filteredTours
     };
   };
 
@@ -959,18 +1002,20 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
 
 
 
-export async function generateTours({ sessionId, latitude, longitude, durationMinutes, redisClient }) {
+export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, redisClient }) {
   let city = null;
   let neighborhood = null;
   let tours = [];
 
   if (!redisClient) {
     console.warn('[tourGeneration] Redis client not provided; running in stateless mode.');
-    const areaContext = await buildAreaContext({ latitude, longitude });
+    const areaContext = await buildAreaContext({ latitude, longitude, durationMinutes });
     const rawTours = await generateToursWithGemini({
       latitude,
       longitude,
       durationMinutes,
+      customization,
+      language,
       city: areaContext.city,
       neighborhood: areaContext.neighborhood,
       pois: areaContext.pois,
@@ -989,6 +1034,8 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     latitude,
     longitude,
     durationMinutes,
+    customization,
+    language,
     redisClient,
   });
 

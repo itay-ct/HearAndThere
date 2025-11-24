@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
-const FRONTEND_VERSION = '1.0.8'; // Update this with each commit
+const FRONTEND_VERSION = '1.0.9'; // Update this with each commit
 
 type TourStop = {
   name: string
@@ -29,6 +29,8 @@ function App() {
   const [latitude, setLatitude] = useState<number | ''>('')
   const [longitude, setLongitude] = useState<number | ''>('')
   const [durationMinutes, setDurationMinutes] = useState<number>(90)
+  const [customization, setCustomization] = useState<string>('')
+  const [language, setLanguage] = useState<string>('english')
   const [status, setStatus] = useState<Status>('idle')
   const [message, setMessage] = useState<string>('')
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -43,6 +45,7 @@ function App() {
   const [audioguideError, setAudioguideError] = useState<string | null>(null)
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
   const [toursGenerated, setToursGenerated] = useState<boolean>(false)
+  const [shareableTourId, setShareableTourId] = useState<string | null>(null)
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
@@ -131,13 +134,13 @@ function App() {
       },
       async (err) => {
         console.error('Geolocation error', err)
-        
+
         // Try IP-based location as fallback
         try {
           setMessage('GPS unavailable, trying IP-based location...')
           const response = await fetch('https://ipapi.co/json/')
           const data = await response.json()
-          
+
           if (data.latitude && data.longitude) {
             setLatitude(Number(data.latitude.toFixed(6)))
             setLongitude(Number(data.longitude.toFixed(6)))
@@ -147,7 +150,7 @@ function App() {
         } catch (ipError) {
           console.error('IP location failed:', ipError)
         }
-        
+
         // Final fallback
         setStatus('error')
         setMessage('Location unavailable. Please enter coordinates manually.')
@@ -186,7 +189,14 @@ function App() {
 
     try {
       const apiUrl = `${API_BASE_URL}/api/session`
-      const payload = { latitude, longitude, durationMinutes, sessionId: clientSessionId }
+      const payload = {
+        latitude,
+        longitude,
+        durationMinutes,
+        sessionId: clientSessionId,
+        customization: customization.trim() || undefined,
+        language
+      }
 
       console.log('=== API REQUEST DEBUG ===')
       console.log('Environment mode:', import.meta.env.MODE)
@@ -341,6 +351,7 @@ function App() {
     setAudioguideGenerating(true)
     setAudioguideData(null)
     setAudioguideError(null)
+    setShareableTourId(null)
     setMessage('Generating audioguide scripts and audio files...')
 
     try {
@@ -359,6 +370,12 @@ function App() {
 
       const data = await response.json()
       console.log('Audioguide generation started:', data)
+
+      // Store the shareable tour ID
+      if (data.tourId) {
+        setShareableTourId(data.tourId)
+      }
+
       setMessage('Audioguide generation in progress...')
 
       // Start polling for status
@@ -435,18 +452,18 @@ function App() {
   // Add map initialization function
   const initializeMap = useCallback(async () => {
     if (!selectedTour || !latitude || !longitude) return
-    
+
     try {
       const mapElement = document.getElementById('tour-map')
       if (!mapElement) return
-      
+
       // Initialize map centered on user's starting location
       const map = new window.google.maps.Map(mapElement, {
         zoom: 15,
         center: { lat: Number(latitude), lng: Number(longitude) },
         mapTypeId: window.google.maps.MapTypeId.ROADMAP,
       })
-      
+
       // Add marker for starting location
       new window.google.maps.Marker({
         position: { lat: Number(latitude), lng: Number(longitude) },
@@ -462,7 +479,7 @@ function App() {
           scaledSize: new window.google.maps.Size(24, 24),
         }
       })
-      
+
       // Add markers for each stop
       selectedTour.stops.forEach((stop, index) => {
         new window.google.maps.Marker({
@@ -484,7 +501,7 @@ function App() {
           }
         })
       })
-      
+
       // Create directions service and renderer
       const directionsService = new window.google.maps.DirectionsService()
       const directionsRenderer = new window.google.maps.DirectionsRenderer({
@@ -495,26 +512,26 @@ function App() {
           strokeOpacity: 0.8,
         }
       })
-      
+
       directionsRenderer.setMap(map)
-      
+
       // Build waypoints (all stops except the last one)
       const waypoints = selectedTour.stops.slice(0, -1).map(stop => ({
         location: { lat: stop.latitude, lng: stop.longitude },
         stopover: true,
       }))
-      
+
       // Request directions
       const request = {
         origin: { lat: Number(latitude), lng: Number(longitude) },
-        destination: { 
-          lat: selectedTour.stops[selectedTour.stops.length - 1].latitude, 
-          lng: selectedTour.stops[selectedTour.stops.length - 1].longitude 
+        destination: {
+          lat: selectedTour.stops[selectedTour.stops.length - 1].latitude,
+          lng: selectedTour.stops[selectedTour.stops.length - 1].longitude
         },
         waypoints: waypoints,
         travelMode: window.google.maps.TravelMode.WALKING,
       }
-      
+
       directionsService.route(request, (result, status) => {
         if (status === 'OK' && result) {
           directionsRenderer.setDirections(result)
@@ -524,7 +541,7 @@ function App() {
           setMapError(`Failed to load walking directions: ${status}`)
         }
       })
-      
+
     } catch (error) {
       console.error('Error initializing map:', error)
       setMapError(error instanceof Error ? error.message : 'Failed to initialize map')
@@ -541,7 +558,7 @@ function App() {
       return new Promise<void>((resolve, reject) => {
         const script = document.createElement('script')
         const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-        
+
         if (!apiKey) {
           reject(new Error('Google Maps API key not configured'))
           return
@@ -550,10 +567,10 @@ function App() {
         script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`
         script.async = true
         script.defer = true
-        
+
         script.onload = () => resolve()
         script.onerror = () => reject(new Error('Failed to load Google Maps'))
-        
+
         document.head.appendChild(script)
       })
     }
@@ -568,7 +585,7 @@ function App() {
     <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
         {/* STEP 1: Input Form */}
-        <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50' : ''}`}>
+        <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
           <header className="mb-8 text-center">
             <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
               Hear &amp; There
@@ -650,6 +667,35 @@ function App() {
                 </div>
               </section>
 
+              <section>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-slate-800">Language</h2>
+                </div>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                >
+                  <option value="english">English</option>
+                  <option value="hebrew">עברית (Hebrew)</option>
+                </select>
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-slate-800">Customization</h2>
+                  <p className="text-xs text-slate-500">Optional</p>
+                </div>
+                <textarea
+                  value={customization}
+                  onChange={(e) => setCustomization(e.target.value)}
+                  placeholder="E.g., 'Focus on street art and modern culture' or 'Include kid-friendly stops'"
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
+                />
+              </section>
+
+
               <div className="pt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   type="submit"
@@ -666,9 +712,27 @@ function App() {
             </form>
           </div>
 
+        {/* STEP 1.5: Tour Generation Loading */}
+        {status === 'saving' && !toursGenerated && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
+              <h3 className="text-sm font-semibold text-sky-900 mb-4">
+                🗺️ Generating Tours
+              </h3>
+              <p className="text-xs text-sky-700 mb-4">
+                Creating personalized walking tours for you. This may take a moment...
+              </p>
+              <div className="flex items-center gap-3 text-xs">
+                <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-sky-700">Analyzing area and generating tours...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* STEP 2: Tour Selection */}
         {toursGenerated && tours.length > 0 && (
-          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${selectedTour ? 'opacity-50' : ''}`}>
+          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
             <header className="mb-6 text-center">
               <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
                 Hear &amp; There
@@ -684,6 +748,19 @@ function App() {
             </header>
 
             <div className="space-y-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setToursGenerated(false);
+                  setTours([]);
+                  setSelectedTour(null);
+                  setSelectedTourId(null);
+                }}
+                className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+              >
+                <span>←</span>
+                <span>Go Back</span>
+              </button>
                 <div className="-mx-4 overflow-x-auto pb-2">
                   <div className="flex gap-4 px-1">
                     {tours.map((tour) => (
@@ -741,7 +818,19 @@ function App() {
 
         {/* STEP 3: Map View */}
         {selectedTour && (
-          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${audioguideData || audioguideGenerating || audioguideError ? 'opacity-50' : ''}`}>
+          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${audioguideData || audioguideGenerating || audioguideError ? 'opacity-50 pointer-events-none' : ''}`}>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTour(null);
+                setSelectedTourId(null);
+              }}
+              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+            >
+              <span>←</span>
+              <span>Go Back</span>
+            </button>
+
             <header className="mb-6 text-center">
               <h2 className="text-2xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h2>
               <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
@@ -795,6 +884,19 @@ function App() {
         {/* STEP 5: Audioguide Status/Player */}
         {selectedTour && audioguideGenerating && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <button
+              type="button"
+              onClick={() => {
+                setAudioguideGenerating(false);
+                setAudioguideData(null);
+                setAudioguideError(null);
+              }}
+              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+            >
+              <span>←</span>
+              <span>Go Back</span>
+            </button>
+
             <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
               <h3 className="text-sm font-semibold text-sky-900 mb-4">
                 🎧 Generating Audioguide
@@ -812,6 +914,19 @@ function App() {
 
         {selectedTour && audioguideError && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <button
+              type="button"
+              onClick={() => {
+                setAudioguideGenerating(false);
+                setAudioguideData(null);
+                setAudioguideError(null);
+              }}
+              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+            >
+              <span>←</span>
+              <span>Go Back</span>
+            </button>
+
             <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6">
               <h3 className="text-sm font-semibold text-red-900 mb-4">
                 ❌ Audioguide Generation Failed
@@ -830,8 +945,43 @@ function App() {
           </div>
         )}
 
-        {selectedTour && audioguideData && audioguideData.audioFiles && (
+        {selectedTour && shareableTourId && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
+              <h3 className="text-sm font-semibold text-emerald-900 mb-4">
+                🎧 Your Audioguide is Being Created!
+              </h3>
+              <p className="text-xs text-emerald-700 mb-6">
+                Your personalized audioguide is being generated. Click the button below to view your tour page.
+              </p>
+              <a
+                href={`/tour/${shareableTourId}`}
+                className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+              >
+                🎧 Take me to my audiotour
+              </a>
+              <p className="text-xs text-slate-500 mt-4">
+                You can share this link with others!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Legacy audioguide player - kept for backward compatibility */}
+        {selectedTour && audioguideData && audioguideData.audioFiles && !shareableTourId && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <button
+              type="button"
+              onClick={() => {
+                setAudioguideGenerating(false);
+                setAudioguideData(null);
+                setAudioguideError(null);
+              }}
+              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+            >
+              <span>←</span>
+              <span>Go Back</span>
+            </button>
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6">
               <h3 className="text-sm font-semibold text-emerald-900 mb-4">
                 🎧 Audioguide Ready

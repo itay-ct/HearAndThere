@@ -4,7 +4,7 @@ import fetch from 'node-fetch';
 import { GoogleAuth } from 'google-auth-library';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
+const GEMINI_AUDIOGUIDE_MODEL = process.env.GEMINI_AUDIOGUIDE_MODEL || 'gemini-3-pro-preview';
 const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'hear-and-there-audio';
 
 // Google Cloud Service Account credentials
@@ -59,7 +59,7 @@ async function getGeminiModel() {
       .then((mod) => {
         if (!GEMINI_API_KEY) return null;
         const genAI = new mod.GoogleGenerativeAI(GEMINI_API_KEY);
-        return genAI.getGenerativeModel({ model: GEMINI_MODEL });
+        return genAI.getGenerativeModel({ model: GEMINI_AUDIOGUIDE_MODEL });
       })
       .catch((err) => {
         console.warn('[audioguide] Failed to load Gemini model', err);
@@ -93,11 +93,15 @@ async function getLangGraphModules() {
 /**
  * Generate script for tour introduction
  */
-async function generateIntroScript({ tour, areaContext }) {
+async function generateIntroScript({ tour, areaContext, language }) {
   const model = await getGeminiModel();
   if (!model) {
     throw new Error('Gemini model not available');
   }
+
+  const languageInstruction = language === 'hebrew'
+    ? 'Write the ENTIRE script in HEBREW (עברית). Use natural, conversational Hebrew.'
+    : 'Write the ENTIRE script in ENGLISH.';
 
   const prompt = `You are a professional tour guide creating an engaging audio introduction for a walking tour.
 
@@ -119,6 +123,7 @@ Create a warm, engaging 2-3 minute introduction script that:
 4. Sets an enthusiastic, friendly tone
 5. Mentions the number of stops and approximate duration
 
+${languageInstruction}
 Write in a natural, conversational style as if speaking directly to the visitor.
 Do NOT include stage directions or speaker labels - just the script text.
 Keep it between 300-450 words.`;
@@ -136,7 +141,7 @@ Keep it between 300-450 words.`;
 /**
  * Generate script for a specific stop
  */
-async function generateStopScript({ stop, stopIndex, totalStops, tour, areaContext, nextStop }) {
+async function generateStopScript({ stop, stopIndex, totalStops, tour, areaContext, nextStop, language }) {
   const model = await getGeminiModel();
   if (!model) {
     throw new Error('Gemini model not available');
@@ -144,6 +149,10 @@ async function generateStopScript({ stop, stopIndex, totalStops, tour, areaConte
 
   const isFirst = stopIndex === 0;
   const isLast = stopIndex === totalStops - 1;
+
+  const languageInstruction = language === 'hebrew'
+    ? 'Write the ENTIRE script in HEBREW (עברית). Use natural, conversational Hebrew.'
+    : 'Write the ENTIRE script in ENGLISH.';
 
   // Build walking directions context for the NEXT leg (after this stop)
   let walkingContext = '';
@@ -188,6 +197,7 @@ Create an engaging 3-5 minute audio script that:
 
 ${!isLast ? `IMPORTANT: End the script by guiding them to the next stop. Use the walking directions provided above to give them clear, friendly guidance. If the streets have interesting historical or cultural significance, mention it! For example: "Now we'll head down Ben Yehuda Street, named after the father of modern Hebrew, where you'll see..."` : ''}
 
+${languageInstruction}
 Write in a natural, conversational, enthusiastic style as if you're walking with them.
 Do NOT include stage directions or speaker labels - just the script text.
 Keep it between 500-750 words.
@@ -209,13 +219,21 @@ ${isLast ? 'End with a memorable closing that thanks them and wishes them well.'
  * Synthesize text to speech using Google Cloud TTS REST API with service account
  * and upload to Google Cloud Storage
  */
-async function synthesizeAudio({ text, outputFileName }) {
+async function synthesizeAudio({ text, outputFileName, language }) {
+  // Select voice based on language
+  const voiceConfig = language === 'hebrew'
+    ? {
+        languageCode: 'he-IL',
+        name: 'he-IL-Chirp3-HD-Alnilam', // Hebrew female voice
+      }
+    : {
+        languageCode: 'en-US',
+        name: 'en-US-Chirp3-HD-Charon', // English Chirp3-HD voice
+      };
+
   const requestBody = {
     input: { text },
-    voice: {
-      languageCode: 'en-US',
-      name: 'en-US-Chirp3-HD-Charon',
-    },
+    voice: voiceConfig,
     audioConfig: {
       audioEncoding: 'MP3',
       speakingRate: 1.0,
@@ -277,7 +295,7 @@ async function synthesizeAudio({ text, outputFileName }) {
 /**
  * Build the audioguide generation graph
  */
-export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
+export async function buildAudioguideGraph({ sessionId, tourId, language, redisClient }) {
   const modules = await getLangGraphModules();
   if (!modules) {
     throw new Error('LangGraph modules not available');
@@ -298,6 +316,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
     areaContext: Annotation({
       reducer: (x, y) => y ?? x,
       default: () => null,
+    }),
+    language: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => 'english',
     }),
     scripts: Annotation({
       reducer: (x, y) => {
@@ -392,13 +414,13 @@ export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
 
   // Node: Generate a single script (intro or stop)
   const generateScriptNode = async (state) => {
-    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop } = state;
+    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, language } = state;
 
-    console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex);
+    console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex, 'language:', language);
 
     let script;
     if (scriptType === 'intro') {
-      script = await generateIntroScript({ tour: selectedTour, areaContext });
+      script = await generateIntroScript({ tour: selectedTour, areaContext, language });
       return {
         scripts: {
           intro: { status: 'complete', content: script },
@@ -412,6 +434,7 @@ export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
         tour: selectedTour,
         areaContext,
         nextStop, // Pass next stop for walking directions
+        language,
       });
 
       // Update the specific stop script
@@ -460,20 +483,20 @@ export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
 
   // Node: Synthesize a single audio file (intro or stop)
   const synthesizeAudioNode = async (state) => {
-    const { audioType, stopIndex, text, tourId } = state;
+    const { audioType, stopIndex, text, tourId, language } = state;
 
     if (!text) {
       console.warn(`[audioguide] No text available for ${audioType} at stopIndex ${stopIndex}`);
       return {};
     }
 
-    console.log(`[audioguide] Synthesizing ${audioType} audio, stopIndex:`, stopIndex);
+    console.log(`[audioguide] Synthesizing ${audioType} audio, stopIndex:`, stopIndex, 'language:', language);
 
     const fileName = audioType === 'intro'
       ? `${tourId}_intro.mp3`
       : `${tourId}_stop_${stopIndex}.mp3`;
 
-    const audioUrl = await synthesizeAudio({ text, outputFileName: fileName });
+    const audioUrl = await synthesizeAudio({ text, outputFileName: fileName, language });
 
     if (audioType === 'intro') {
       return {
@@ -520,10 +543,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, redisClient }) {
 /**
  * Main function to generate audioguide for a tour
  */
-export async function generateAudioguide({ sessionId, tourId, selectedTour, areaContext, redisClient }) {
-  console.log('[audioguide] Starting audioguide generation for tour:', tourId);
+export async function generateAudioguide({ sessionId, tourId, selectedTour, areaContext, language, redisClient }) {
+  console.log('[audioguide] Starting audioguide generation for tour:', tourId, 'language:', language);
 
-  const graph = await buildAudioguideGraph({ sessionId, tourId, redisClient });
+  const graph = await buildAudioguideGraph({ sessionId, tourId, language, redisClient });
 
   const config = {
     configurable: { thread_id: `${sessionId}_audioguide_${tourId}` },
@@ -534,6 +557,7 @@ export async function generateAudioguide({ sessionId, tourId, selectedTour, area
       tourId,
       selectedTour,
       areaContext,
+      language: language || 'english',
     },
     config
   );
