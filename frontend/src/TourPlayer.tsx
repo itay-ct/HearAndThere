@@ -550,7 +550,7 @@ export default function TourPlayer() {
                     </div>
 
                     {/* Walking Directions - Floating between stops */}
-                    {stop.walkingDirections && index < tourData.tour!.stops.length - 1 && (
+                    {index < tourData.tour!.stops.length - 1 && tourData.tour!.stops[index + 1].walkingDirections && (
                       <div className="my-4 mx-8">
                         <button
                           onClick={() => toggleDirections(index)}
@@ -568,12 +568,12 @@ export default function TourPlayer() {
                                   Walking to {tourData.tour!.stops[index + 1].name}
                                 </p>
                                 <p className="text-[10px] text-emerald-700">
-                                  {stop.walkingDirections.distance} · {stop.walkingDirections.duration}
+                                  {tourData.tour!.stops[index + 1].walkingDirections.distance} · {tourData.tour!.stops[index + 1].walkingDirections.duration}
                                 </p>
                               </div>
                             </div>
                             <ol className="space-y-2 pl-1">
-                              {stop.walkingDirections.steps.map((step, stepIdx) => (
+                              {tourData.tour!.stops[index + 1].walkingDirections.steps.map((step, stepIdx) => (
                                 <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
                                   <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
                                   <div className="flex-1">
