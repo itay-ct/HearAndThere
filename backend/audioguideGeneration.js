@@ -5,7 +5,7 @@ import { GoogleAuth } from 'google-auth-library';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_AUDIOGUIDE_MODEL = process.env.GEMINI_AUDIOGUIDE_MODEL || 'gemini-3-pro-preview';
-const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'hear-and-there-audio';
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'itaytevel-hearandthere';
 
 // Google Cloud Service Account credentials
 // In production (Railway), this comes from GOOGLE_APPLICATION_CREDENTIALS_JSON env var
@@ -51,21 +51,32 @@ async function getAuthClient() {
   return authClient;
 }
 
-// Lazy load Gemini model
+// Lazy load Gemini model with fallback support
 let geminiModelPromise;
-async function getGeminiModel() {
-  if (!geminiModelPromise) {
-    geminiModelPromise = import('@google/generative-ai')
+async function getGeminiModel(preferredModel = null) {
+  const modelToUse = preferredModel || GEMINI_AUDIOGUIDE_MODEL;
+  
+  if (!geminiModelPromise || preferredModel) {
+    const promise = import('@google/generative-ai')
       .then((mod) => {
         if (!GEMINI_API_KEY) return null;
         const genAI = new mod.GoogleGenerativeAI(GEMINI_API_KEY);
-        return genAI.getGenerativeModel({ model: GEMINI_AUDIOGUIDE_MODEL });
+        return {
+          model: genAI.getGenerativeModel({ model: modelToUse }),
+          modelName: modelToUse
+        };
       })
       .catch((err) => {
         console.warn('[audioguide] Failed to load Gemini model', err);
         return null;
       });
+    
+    if (!preferredModel) {
+      geminiModelPromise = promise;
+    }
+    return promise;
   }
+  
   return geminiModelPromise;
 }
 
@@ -91,14 +102,52 @@ async function getLangGraphModules() {
 }
 
 /**
+ * Generate content with retry and model fallback
+ */
+async function generateWithRetry(prompt, maxRetries = 2) {
+  const models = [GEMINI_AUDIOGUIDE_MODEL, 'gemini-2.5-pro', 'gemini-1.5-pro'];
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    for (const modelName of models) {
+      try {
+        console.log(`[audioguide] Attempting generation with ${modelName} (attempt ${attempt + 1})`);
+        
+        const geminiResult = await getGeminiModel(modelName);
+        if (!geminiResult) continue;
+        
+        const { model } = geminiResult;
+        const response = await model.generateContent(prompt);
+        const script = response.response.text();
+        
+        console.log(`[audioguide] Successfully generated content with ${modelName}`);
+        return { script, modelUsed: modelName };
+        
+      } catch (err) {
+        console.warn(`[audioguide] ${modelName} failed:`, err.message);
+        
+        // If it's a 429 (quota exceeded), try next model immediately
+        if (err.message?.includes('429') || err.message?.includes('quota')) {
+          console.log(`[audioguide] Quota exceeded for ${modelName}, trying next model`);
+          continue;
+        }
+        
+        // For other errors, wait before retry
+        if (attempt < maxRetries - 1) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          console.log(`[audioguide] Waiting ${delay}ms before retry`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+  }
+  
+  throw new Error('All Gemini models failed after retries');
+}
+
+/**
  * Generate script for tour introduction
  */
 async function generateIntroScript({ tour, areaContext, language }) {
-  const model = await getGeminiModel();
-  if (!model) {
-    throw new Error('Gemini model not available');
-  }
-
   const languageInstruction = language === 'hebrew'
     ? 'Write the ENTIRE script in HEBREW (עברית). Use natural, conversational Hebrew.'
     : 'Write the ENTIRE script in ENGLISH.';
@@ -129,9 +178,8 @@ Do NOT include stage directions or speaker labels - just the script text.
 Keep it between 300-450 words.`;
 
   try {
-    const response = await model.generateContent(prompt);
-    const script = response.response.text();
-    return script;
+    const { script, modelUsed } = await generateWithRetry(prompt);
+    return { script, modelUsed };
   } catch (err) {
     console.error('[audioguide] Failed to generate intro script', err);
     throw err;
@@ -142,11 +190,6 @@ Keep it between 300-450 words.`;
  * Generate script for a specific stop
  */
 async function generateStopScript({ stop, stopIndex, totalStops, tour, areaContext, nextStop, language }) {
-  const model = await getGeminiModel();
-  if (!model) {
-    throw new Error('Gemini model not available');
-  }
-
   const isFirst = stopIndex === 0;
   const isLast = stopIndex === totalStops - 1;
 
@@ -204,9 +247,8 @@ Keep it between 500-750 words.
 ${isLast ? 'End with a memorable closing that thanks them and wishes them well.' : ''}`;
 
   try {
-    const response = await model.generateContent(prompt);
-    const script = response.response.text();
-    return script;
+    const { script, modelUsed } = await generateWithRetry(prompt);
+    return { script, modelUsed };
   } catch (err) {
     console.error(`[audioguide] Failed to generate script for stop ${stopIndex}`, err);
     throw err;
@@ -446,28 +488,36 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, redisC
 
     console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex, 'language:', language);
 
-    let script;
+    let result;
     if (scriptType === 'intro') {
-      script = await generateIntroScript({ tour: selectedTour, areaContext, language });
+      result = await generateIntroScript({ tour: selectedTour, areaContext, language });
       return {
         scripts: {
-          intro: { status: 'complete', content: script },
+          intro: { 
+            status: 'complete', 
+            content: result.script,
+            modelUsed: result.modelUsed 
+          },
         },
       };
     } else {
-      script = await generateStopScript({
+      result = await generateStopScript({
         stop,
         stopIndex,
         totalStops: selectedTour.stops.length,
         tour: selectedTour,
         areaContext,
-        nextStop, // Pass next stop for walking directions
+        nextStop,
         language,
       });
 
       // Update the specific stop script
       const updatedStops = [...(state.scripts?.stops || [])];
-      updatedStops[stopIndex] = { status: 'complete', content: script };
+      updatedStops[stopIndex] = { 
+        status: 'complete', 
+        content: result.script,
+        modelUsed: result.modelUsed 
+      };
 
       return {
         scripts: {
