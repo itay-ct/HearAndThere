@@ -1,63 +1,92 @@
 
-# Hear & There — Initial Build Specification (v0.1)
+# Hear & There — Product Specification (v1.0.10)
 
-> Lightweight, responsive React app for discovering personalized walking tours.
-> **Goal of this milestone:** Implement the initial "Start Your Tour" flow plus an AI-powered tour generation pipeline that stores the user's request and top 3 candidate tours in Redis, and displays a "Which tour do you prefer?" selection screen.
+> AI-powered walking tour generator with audio guides, shareable tours, and real-time navigation.
+> **Current Status:** Full-featured MVP with tour generation, audioguide creation, shareable tour player, and comprehensive LangSmith observability.
 
 ---
 
 ## 🎯 Overview
 
 **App Name:** Hear & There
-**Framework:** React with Vite
-**UI Library:** Tailwind CSS (lightweight and mobile-friendly)
+**Framework:** React with Vite + TypeScript
+**UI Library:** Tailwind CSS (mobile-first, responsive design)
 **Backend:** Node.js (Express) with LangGraph + Gemini
-**Data Store:** Redis (session + AI agent memory)
+**Data Store:** Redis (sessions, checkpointing, tour data)
+**Cloud Services:** Google Cloud (TTS, Storage)
 **Hosting:** Frontend on Vercel, backend on Railway
-**Version:** 1.0.3 — MVP flow with AI-native LangGraph tour generation and Redis-backed memory.
+**Monitoring:** LangSmith for AI observability
+**Version:** 1.0.10 — Production-ready with audio guides, shareable tours, and full tracing
 
 ---
 
-## 🧩 Features in This Step
+## 🧩 Core Features
 
-1. **Frontend (React + Tailwind) — Start Your Tour**
-   - Responsive design (mobile-first, travel-style look)
-   - Optimized for both mobile and desktop with fluid layouts
-   - Enhanced visual hierarchy with proper spacing and typography
-   - Two user inputs:
-     - **Location**
-       - Option A: "Use My Location" button (HTML5 Geolocation API)
-       - Option B: Manual coordinate input (latitude, longitude)
-       - *(Later version may add "Choose on Map")*
-     - **Duration Slider**
-       - Range: **15 minutes → 4 hours**
-       - Step: **5 minutes**
-       - Label shows selected duration dynamically.
-   - **Propose Tours** button:
-     - On click → calls backend `POST /api/session` with location + duration.
-     - Frontend shows a loading state ("Your journey is being prepared...") while tours are being computed.
-     - On success → navigates to the **"Which tour do you prefer?"** screen with the top 3 tours.
+### 1. **Tour Generation Interface**
+   - **Responsive design** - Mobile-first, travel-style aesthetic
+   - **Location input**:
+     - "Use My Location" button (HTML5 Geolocation API)
+     - Manual coordinate input (latitude, longitude)
+   - **Duration slider**:
+     - Range: **15 minutes → 4+ hours**
+     - Step: **5 minutes**
+     - Dynamic label shows selected duration
+   - **Optional customization**:
+     - Text input for preferences (e.g., "historical sites", "food tour")
+   - **Language selection**:
+     - English or Hebrew
+   - **"Propose Tours" button**:
+     - Calls `POST /api/session` with location, duration, customization, language
+     - Shows loading state with progress messages
+     - Displays top 3 AI-generated tours on success
 
-2. **Backend (Node.js + Redis + LangGraph + Gemini)**
-   - Express server with `POST /api/session`.
-   - Request body:
+### 2. **Tour Selection Screen**
+   - **Tour cards** - Display title, theme, abstract, duration, stop count
+   - **Stop details** - Expandable list of POIs with dwell times
+   - **Walking time estimates** - Both LLM estimates and Google Maps validated times
+   - **Interactive map** - Google Maps with walking route visualization
+   - **"Generate Audioguide" button** - Creates audio-guided tour
+
+### 3. **Audioguide Generation**
+   - **AI script generation** - Gemini creates engaging narratives
+   - **Multi-language support** - English and Hebrew
+   - **Text-to-Speech** - Google Cloud TTS with Chirp3-HD voices
+   - **Parallel processing** - All audio files generated concurrently
+   - **Progress tracking** - Real-time status updates
+   - **Shareable tour creation** - Generates unique tour ID and URL
+
+### 4. **Tour Player (Shareable)**
+   - **Unique URL** - `/tour/:tourId` for sharing
+   - **Interactive map** - Google Maps with walking directions
+   - **Audio playback** - Play/pause controls for intro and each stop
+   - **Walking directions** - Step-by-step navigation between stops
+   - **Expandable content** - Show/hide directions and scripts
+   - **Feedback system** - 5-star rating and text feedback
+   - **Mobile-optimized** - Touch-friendly controls and responsive layout
+   - **Version display** - Shows app version in footer
+
+### 5. **Backend API**
+
+#### **Tour Generation** - `POST /api/session`
+   - **Request body**:
      ```json
      {
        "latitude": 32.0809,
        "longitude": 34.7806,
-       "durationMinutes": 90
+       "durationMinutes": 90,
+       "customization": "historical sites and local food",
+       "language": "english"
      }
      ```
-   - Behavior (happy path):
-     - Generate UUID (`sessionId`) and store base session in Redis (`session:{sessionId}`) with `latitude`, `longitude`, `durationMinutes`, `createdAt`.
-     - Run a LangGraph workflow that:
-       - reverse-geocodes the start point via Google Maps (city + neighborhood),
-       - searches nearby POIs via Google Maps Places,
-       - optionally enriches area context via Wikipedia (direct API or Wikipedia MCP),
-       - calls **Gemini** to propose ~10 candidate walking tours,
-       - scores and keeps the **top tours** (usually 3) matching the duration.
-     - Persist context + tours into Redis (see LangGraph section) under keys derived from `session:{sessionId}`.
-   - Response:
+   - **Behavior**:
+     - Generate UUID (`sessionId`)
+     - Store session in Redis (`session:{sessionId}`)
+     - Run LangGraph tour generation workflow:
+       1. **collect_context** - Reverse geocode, search POIs, generate summaries
+       2. **generate_candidate_tours** - Gemini creates ~10 tour options
+       3. **validate_walking_times** - Google Directions API validates routes
+     - Persist tours to Redis with LangGraph checkpointing
+   - **Response**:
      ```json
      {
        "sessionId": "abc123",
@@ -68,7 +97,7 @@
          {
            "id": "tour_1",
            "title": "Seaside Promenade Highlights",
-           "abstract": "A relaxed 90-minute coastal walk with historic views and cafés.",
+           "abstract": "A relaxed 90-minute coastal walk...",
            "theme": "History & Seafront",
            "estimatedTotalMinutes": 85,
            "stops": [
@@ -77,80 +106,204 @@
                "latitude": 32.0809,
                "longitude": 34.7806,
                "dwellMinutes": 15,
-               "walkMinutesFromPrevious": 0
+               "walkMinutesFromPrevious": 0,
+               "walkMinutesFromPrevious_llm": 0,
+               "walkingDirections": {
+                 "distance": "1.2 km",
+                 "duration": "15 mins",
+                 "steps": [...]
+               }
              }
            ]
          }
        ]
      }
      ```
-   - Redis core record remains:
+
+#### **Audioguide Generation** - `POST /api/session/:sessionId/tour/:tourId/audioguide`
+   - **Request body**:
+     ```json
+     {
+       "language": "hebrew"
+     }
      ```
-     session:{sessionId}
-       latitude: 32.0809
-       longitude: 34.7806
-       durationMinutes: 90
-       createdAt: 1731600000000
-       city: Tel Aviv-Yafo
-       neighborhood: Florentin
-       tours: [JSON-serialized array of top tours]
+   - **Behavior**:
+     - Generate shareable tour ID
+     - Store tour data in Redis (`tour:{tourId}`)
+     - Run LangGraph audioguide generation workflow:
+       1. **fan_out_scripts** - Generate intro + stop scripts in parallel
+       2. **fan_in_scripts** - Collect all scripts
+       3. **fan_out_audio** - Synthesize all audio files in parallel
+       4. **fan_in_audio** - Collect all audio URLs
+     - Update tour status to 'complete'
+   - **Response**:
+     ```json
+     {
+       "tourId": "tour_abc123",
+       "status": "generating",
+       "message": "Audioguide generation started"
+     }
      ```
 
-3. **Styling Goals**
-   - Clean, airy layout with travel theme optimized for all screen sizes
-   - Mobile-first responsive design with breakpoint considerations
-   - Enhanced visual appeal with proper contrast and accessibility
-   - Color palette: soft sand (#fefaf6), ocean blue (#2c6e91), accent coral (#f36f5e).
-   - Rounded cards, large buttons, gentle shadows.
-   - Use Tailwind utilities for responsive layout and component styling.
-   - Simple typography (e.g., Inter or Nunito Sans) with proper font scaling.
+#### **Tour Player** - `GET /api/tour/:tourId`
+   - **Response**:
+     ```json
+     {
+       "tourId": "tour_abc123",
+       "status": "complete",
+       "tour": { /* tour data */ },
+       "scripts": {
+         "intro": { "content": "Welcome to..." },
+         "stops": [{ "content": "This historic site..." }]
+       },
+       "audioFiles": {
+         "intro": { "url": "https://storage.googleapis.com/...", "status": "complete" },
+         "stops": [{ "url": "https://storage.googleapis.com/...", "status": "complete" }]
+       },
+       "createdAt": "2024-11-24T10:30:00Z",
+       "completedAt": "2024-11-24T10:35:00Z"
+     }
+     ```
 
-4. **AI Tour Generation & Selection**
-   - Use LangGraph to orchestrate tool calls (Google Maps MCP + Wikipedia Nearby MCP) to compute candidate tours.
-   - Store the top 3 tours in Redis under the user's session.
-   - Expose tour data to the frontend so the user can immediately pick a preferred tour on the second screen.
+#### **Feedback** - `POST /api/tour/:tourId/feedback`
+   - **Request body**:
+     ```json
+     {
+       "rating": 5,
+       "feedback": "Amazing tour!"
+     }
+     ```
+   - **Response**:
+     ```json
+     {
+       "success": true,
+       "message": "Feedback submitted"
+     }
+     ```
 
 ---
-## 🧮 LangGraph + Gemini Tour Generation (AI-native)
 
-### Integrations
+## 🧮 LangGraph Workflows
 
-- **Google Maps (REST or MCP)** – reverse geocode, search POIs near the start point.
-- **Wikipedia (REST or MCP)** – fetch simple area/context summaries.
-- **Gemini (via @langchain/google-genai)** – generate and refine walking tours.
-- **Redis** – primary memory for all stages of the agent, keyed by `session:{sessionId}`.
+### Tour Generation Graph
 
-### Graph (conceptual)
-
+**Nodes:**
 1. **collect_context**
-   - Inputs: `sessionId`, `latitude`, `longitude`, `durationMinutes`.
-   - Reverse-geocode to get `city` + `neighborhood`.
-   - Search nearby POIs via Google Maps.
-   - Optionally fetch Wikipedia summaries for `city` / `neighborhood`.
-   - Persist to Redis:
-     - `session:{sessionId}` – base hash with `city`, `neighborhood`.
-     - `session:{sessionId}:pois` – list of POIs.
-     - `session:{sessionId}:wikipedia` – hash with summaries.
-     - `session:{sessionId}:messages` – internal messages/logs.
+   - Inputs: `sessionId`, `latitude`, `longitude`, `durationMinutes`
+   - Calls (all traced with LangSmith):
+     - `reverseGeocode()` - Google Maps Geocoding API → city + neighborhood
+     - `searchNearbyPois()` - Google Places API → up to 20 POIs
+       - Dynamic radius based on tour duration (500m - 3000m)
+       - Primary types: historical sites, museums, parks, cafes, etc.
+       - Secondary types: art studios, beaches, viewpoints, etc.
+     - `generateCitySummary()` - Gemini 2.5 Flash → city context
+     - `generateNeighborhoodSummary()` - Gemini 2.5 Flash → neighborhood context
+   - Output: `areaContext` with city, neighborhood, POIs, summaries
 
 2. **generate_candidate_tours**
-   - Load area context from Redis.
-   - Call Gemini with structured JSON describing start point, POIs, and Wikipedia context.
-   - Ask Gemini for ~10 candidate tours with themes and time estimates.
-   - Persist candidates to `session:{sessionId}:candidate_tours` and update `stage` in the main hash.
+   - Input: `areaContext` from previous node
+   - Calls:
+     - `generateToursWithGemini()` - Gemini 2.5 Flash
+       - Generates ~10 candidate tours
+       - Includes themes, abstracts, stops, timing estimates
+       - Considers user customization and language
+   - Fallback: `heuristicToursFromPois()` if Gemini unavailable
+   - Output: `candidateTours` array
 
-3. **rank_tours**
-   - Load candidate tours from Redis (or fall back to heuristic tours from POIs).
-   - Score tours by fit to `durationMinutes` and POI variety.
-   - Keep the **top tours** (usually 3).
-   - Persist final tours to `session:{sessionId}:tours` and mirror them into `tours` on the main hash.
+3. **validate_walking_times**
+   - Input: `candidateTours` from previous node
+   - Calls:
+     - `filterAndRankTours()` - Score and rank by duration fit
+     - `validateWalkingTimes()` - For each tour:
+       - `getWalkingDirections()` - Google Directions API (traced)
+       - Validates LLM time estimates against real walking times
+       - Adds step-by-step directions to each stop
+   - Output: `finalTours` (top 3) with validated routes
 
-The `POST /api/session` handler invokes this graph and then responds with `{ sessionId, status, city, neighborhood, tours }` based on what was stored in Redis.
+**Checkpointing:** Uses `RedisSaver` for LangGraph state persistence
+
+### Audioguide Generation Graph
+
+**Nodes:**
+1. **fan_out_scripts**
+   - Generates scripts in parallel using `Send`:
+     - Intro script (tour overview)
+     - Stop scripts (one per POI)
+   - Each script generated by `generateWithRetry()`:
+     - Primary model: Gemini 3 Pro Preview
+     - Fallback on 429: Gemini 2.5 Pro
+     - Max 3 retries with exponential backoff
+   - Output: Sends to `generate_script` node for each item
+
+2. **generate_script**
+   - Input: Tour data, stop data, area context
+   - Calls: `generateWithRetry()` with Gemini
+   - Output: Script content
+
+3. **fan_in_scripts**
+   - Collects all generated scripts
+   - Output: `scripts` object with intro and stops
+
+4. **fan_out_audio**
+   - Synthesizes audio in parallel using `Send`:
+     - Intro audio
+     - Stop audio (one per POI)
+   - Output: Sends to `synthesize_audio` node for each item
+
+5. **synthesize_audio**
+   - Input: Script text, language
+   - Calls: `synthesizeAudio()` (traced)
+     - Validates byte length (5000 byte TTS limit)
+     - Trims text if necessary
+     - Calls Google Cloud TTS API
+     - Uploads to Google Cloud Storage
+   - Voice selection:
+     - English: `en-US-Chirp3-HD-Charon`
+     - Hebrew: `he-IL-Chirp3-HD-Alnilam`
+   - Output: Audio file URL
+
+6. **fan_in_audio**
+   - Collects all audio URLs
+   - Output: `audioFiles` object with intro and stops
+
+**Checkpointing:** Uses `RedisSaver` for LangGraph state persistence
+
+---
+
+## 🔍 LangSmith Observability
+
+All external API calls are wrapped with `@traceable` for complete visibility:
+
+### Tour Generation Traces
+- `reverseGeocode` - Geocoding API calls
+- `searchNearbyPois` - POI discovery orchestration
+- `searchPlacesNearby` - Individual Places API requests
+- `buildAreaContext` - Full context building pipeline
+- `getWalkingDirections` - Directions API calls
+
+### Audioguide Generation Traces
+- `synthesizeAudio` - TTS API + GCS upload
+- `generateWithRetry` - Gemini script generation (via LangChain)
+
+### Trace Metadata
+- Function name and run type (`'tool'`)
+- Input parameters
+- Output values
+- Execution duration
+- Error messages and stack traces
+- Parent-child relationships
+
+### Benefits
+- **Debugging** - See exact inputs/outputs for every API call
+- **Performance** - Identify slow operations and bottlenecks
+- **Cost tracking** - Monitor API usage and token consumption
+- **Error analysis** - Track failure patterns and retry logic
+- **Workflow visualization** - Complete trace hierarchy
 
 ---
 
 
-## 🧠 UX Wireframe Description
+## 🎨 User Experience & Design
 
 **Screen: “Start Your Tour”**
 
@@ -176,41 +329,62 @@ The `POST /api/session` handler invokes this graph and then responds with `{ ses
 
 ---
 
-## 🛠️ Development Environment
+## 🛠️ Development & Deployment
 
-### Frontend
+### Technology Stack
 
-- **Framework:** React with Vite
-- **UI Library:** Tailwind CSS
-- **Build Tool:** Vite
-- **State Management:** React Context or Redux (if needed)
-- **Testing Framework:** Jest
-- **Linting Tool:** ESLint
-- **Version Control:** Git
+**Frontend:**
+- React 18 with TypeScript
+- Vite (build tool)
+- Tailwind CSS (styling)
+- Google Maps JavaScript API
 
-### Backend
+**Backend:**
+- Node.js 18+ with Express
+- LangGraph (AI workflow orchestration)
+- LangChain (AI framework)
+- Redis 7+ (sessions, checkpointing, data storage)
 
-- **Framework:** Node.js (Express) with LangGraph
-- **Data Store:** Redis (session + generated tours)
-- **External Tools (MCP):** Google Maps MCP, Wikipedia Nearby MCP
-- **Build Tool:** npm
-- **Testing Framework:** Jest
-- **Linting Tool:** ESLint
-- **Version Control:** Git
+**AI & APIs:**
+- Google Gemini 2.5 Flash (tour generation)
+- Google Gemini 3 Pro Preview (audioguide scripts)
+- Google Maps APIs (Geocoding, Places, Directions)
+- Google Cloud TTS (Chirp3-HD voices)
+- Google Cloud Storage (audio hosting)
 
-### Versioning & Deployment Tracking
+**Monitoring:**
+- LangSmith (AI observability and tracing)
 
-- **Version Format:** Semantic versioning (e.g., 1.0.3)
-- **Backend Health Endpoint:** `GET /health` returns:
-  ```json
-  {
-    "status": "ok",
-    "version": "1.0.3"
-  }
-  ```
-- **Frontend Version Display:** Version shown at bottom of page in light gray text (e.g., "v1.0.3")
-- **Version Updates:** Increment the version (often patch, sometimes minor) with each meaningful change for deployment tracking
-- **Auto-Deployment:** Both Vercel (frontend) and Railway (backend) deploy automatically on git push to main branch
+### Environment Configuration
+
+**Required Environment Variables:**
+- `GOOGLE_MAPS_API_KEY` - Google Maps Platform API key
+- `GEMINI_API_KEY` - Google AI Studio API key
+- `GOOGLE_APPLICATION_CREDENTIALS` - Path to GCP service account JSON
+- `GCS_BUCKET_NAME` - Google Cloud Storage bucket name
+- `REDIS_URL` - Redis connection string
+- `LANGCHAIN_API_KEY` - LangSmith API key (optional)
+
+### Deployment
+
+**Frontend (Vercel):**
+- Automatic deployment on push to `main`
+- Environment variables: `VITE_GOOGLE_MAPS_API_KEY`
+- SPA routing via `vercel.json`
+- Production URL: `https://hear-and-there.vercel.app`
+
+**Backend (Railway):**
+- Automatic deployment on push to `main`
+- Redis add-on provisioned
+- Environment variables configured in dashboard
+- Production URL: `https://hear-and-there-production.up.railway.app`
+
+### Versioning
+
+- **Format:** Semantic versioning (e.g., 1.0.10)
+- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.10" }`
+- **Frontend Display:** Version shown in tour player footer
+- **Updates:** Increment with each deployment
 
 ---
 

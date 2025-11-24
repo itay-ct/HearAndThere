@@ -1,5 +1,6 @@
 import { Storage } from '@google-cloud/storage';
 import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
+import { traceable } from "langsmith/traceable";
 import fetch from 'node-fetch';
 import { GoogleAuth } from 'google-auth-library';
 
@@ -51,33 +52,42 @@ async function getAuthClient() {
   return authClient;
 }
 
-// Lazy load Gemini model with fallback support
+// Lazy load LangChain Gemini model
 let geminiModelPromise;
-async function getGeminiModel(preferredModel = null) {
-  const modelToUse = preferredModel || GEMINI_AUDIOGUIDE_MODEL;
-  
-  if (!geminiModelPromise || preferredModel) {
-    const promise = import('@google/generative-ai')
+let fallbackModelPromise;
+
+async function getGeminiModel(useFallback = false) {
+  const modelName = useFallback ? 'gemini-2.5-pro' : GEMINI_AUDIOGUIDE_MODEL;
+  const modelPromise = useFallback ? fallbackModelPromise : geminiModelPromise;
+
+  if (!modelPromise) {
+    const promise = import('@langchain/google-genai')
       .then((mod) => {
-        if (!GEMINI_API_KEY) return null;
-        const genAI = new mod.GoogleGenerativeAI(GEMINI_API_KEY);
-        return {
-          model: genAI.getGenerativeModel({ model: modelToUse }),
-          modelName: modelToUse
-        };
+        if (!GEMINI_API_KEY) {
+          console.warn('[audioguide] GEMINI_API_KEY not set');
+          return null;
+        }
+        const { ChatGoogleGenerativeAI } = mod;
+        console.log(`[audioguide] Creating model: ${modelName}`);
+        return new ChatGoogleGenerativeAI({
+          apiKey: GEMINI_API_KEY,
+          model: modelName,
+          temperature: 0.7,
+        });
       })
       .catch((err) => {
         console.warn('[audioguide] Failed to load Gemini model', err);
         return null;
       });
-    
-    if (!preferredModel) {
+
+    if (useFallback) {
+      fallbackModelPromise = promise;
+    } else {
       geminiModelPromise = promise;
     }
     return promise;
   }
-  
-  return geminiModelPromise;
+  return modelPromise;
 }
 
 // Lazy load LangGraph modules
@@ -102,46 +112,71 @@ async function getLangGraphModules() {
 }
 
 /**
- * Generate content with retry and model fallback
+ * Generate content with retry using LangChain model
+ * Falls back to gemini-2.5-pro if 429 (rate limit) errors occur
  */
-async function generateWithRetry(prompt, maxRetries = 2) {
-  const models = [GEMINI_AUDIOGUIDE_MODEL, 'gemini-2.5-pro', 'gemini-1.5-pro'];
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    for (const modelName of models) {
-      try {
-        console.log(`[audioguide] Attempting generation with ${modelName} (attempt ${attempt + 1})`);
-        
-        const geminiResult = await getGeminiModel(modelName);
-        if (!geminiResult) continue;
-        
-        const { model } = geminiResult;
-        const response = await model.generateContent(prompt);
-        const script = response.response.text();
-        
-        console.log(`[audioguide] Successfully generated content with ${modelName}`);
-        return { script, modelUsed: modelName };
-        
-      } catch (err) {
-        console.warn(`[audioguide] ${modelName} failed:`, err.message);
-        
-        // If it's a 429 (quota exceeded), try next model immediately
-        if (err.message?.includes('429') || err.message?.includes('quota')) {
-          console.log(`[audioguide] Quota exceeded for ${modelName}, trying next model`);
-          continue;
-        }
-        
-        // For other errors, wait before retry
-        if (attempt < maxRetries - 1) {
-          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
-          console.log(`[audioguide] Waiting ${delay}ms before retry`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
+async function generateWithRetry(prompt, maxRetries = 3) {
+  let useFallback = false;
+  let currentModelName = GEMINI_AUDIOGUIDE_MODEL;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    try {
+      const model = await getGeminiModel(useFallback);
+      if (!model) {
+        throw new Error('Gemini model not available');
       }
+
+      console.log(`[audioguide] Generating content with ${currentModelName} (attempt ${attempt + 1})`);
+
+      const response = await model.invoke(prompt);
+      const script = response.content || '';
+
+      if (!script || script.trim().length === 0) {
+        throw new Error('Empty response from model');
+      }
+
+      console.log(`[audioguide] Successfully generated content (${script.length} chars)`);
+      return { script, modelUsed: currentModelName };
+
+    } catch (err) {
+      const errorMessage = err.message || '';
+      const statusCode = err.response?.status || err.status;
+
+      console.warn(`[audioguide] Generation failed (attempt ${attempt + 1}):`, errorMessage);
+
+      // Check if it's a 429 rate limit error
+      const is429Error = statusCode === 429 ||
+                         errorMessage.includes('429') ||
+                         errorMessage.includes('rate limit') ||
+                         errorMessage.includes('quota exceeded') ||
+                         errorMessage.includes('RESOURCE_EXHAUSTED');
+
+      // If 429 error and not already using fallback, switch to fallback model
+      if (is429Error && !useFallback) {
+        console.warn(`[audioguide] ⚠️  Rate limit detected! Falling back to gemini-2.5-pro`);
+        useFallback = true;
+        currentModelName = 'gemini-2.5-pro';
+        // Don't count this as a retry attempt, just switch models and try again immediately
+        continue;
+      }
+
+      // Increment attempt counter for non-fallback retries
+      attempt++;
+
+      // If it's the last attempt, throw the error
+      if (attempt >= maxRetries) {
+        throw err;
+      }
+
+      // Wait before retry with exponential backoff
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      console.log(`[audioguide] Waiting ${delay}ms before retry`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  
-  throw new Error('All Gemini models failed after retries');
+
+  throw new Error('Failed to generate content after retries');
 }
 
 /**
@@ -261,7 +296,7 @@ ${isLast ? 'End with a memorable closing that thanks them and wishes them well.'
  * Synthesize text to speech using Google Cloud TTS REST API with service account
  * and upload to Google Cloud Storage
  */
-async function synthesizeAudio({ text, outputFileName, language }) {
+const synthesizeAudio = traceable(async ({ text, outputFileName, language }) => {
   // Google TTS has a 5000 byte limit for text input
   const MAX_BYTES = 4998; // Leave small buffer
 
@@ -360,7 +395,7 @@ async function synthesizeAudio({ text, outputFileName, language }) {
     console.error('[audioguide] Failed to synthesize audio', err);
     throw err;
   }
-}
+}, { name: 'synthesizeAudio', run_type: 'tool' });
 
 /**
  * Build the audioguide generation graph

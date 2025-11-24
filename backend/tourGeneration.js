@@ -94,7 +94,7 @@ async function safeFetch(url, options) {
   return fetch(url, options);
 }
 
-async function reverseGeocode(latitude, longitude) {
+const reverseGeocode = traceable(async (latitude, longitude) => {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[tourGeneration] GOOGLE_MAPS_API_KEY is not set; skipping reverse-geocoding.');
     debugLog('reverseGeocode: missing GOOGLE_MAPS_API_KEY');
@@ -133,7 +133,7 @@ async function reverseGeocode(latitude, longitude) {
   }
 
   return { city, neighborhood };
-}
+}, { name: 'reverseGeocode', run_type: 'tool' });
 
 async function cachePlaceInRedis(redisClient, place) {
   if (!redisClient || !place.id) return;
@@ -199,7 +199,7 @@ async function cachePlaceInRedis(redisClient, place) {
   }
 }
 
-async function searchNearbyPois(latitude, longitude, durationMinutes = 90, redisClient = null) {
+const searchNearbyPois = traceable(async (latitude, longitude, durationMinutes = 90, redisClient = null) => {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[tourGeneration] GOOGLE_MAPS_API_KEY is not set; skipping POI search.');
     debugLog('searchNearbyPois: missing GOOGLE_MAPS_API_KEY');
@@ -328,9 +328,9 @@ const secondaryTypes = [
 
   debugLog('searchNearbyPois: got unique results count', uniqueResults.length);
   return uniqueResults.slice(0, 20);
-}
+}, { name: 'searchNearbyPois', run_type: 'tool' });
 
-async function searchPlacesNearby(latitude, longitude, radiusMeters, includedTypes) {
+const searchPlacesNearby = traceable(async (latitude, longitude, radiusMeters, includedTypes) => {
   const url = 'https://places.googleapis.com/v1/places:searchNearby';
   
   const requestBody = {
@@ -377,7 +377,7 @@ async function searchPlacesNearby(latitude, longitude, radiusMeters, includedTyp
     types: place.types || [],
     rating: place.rating || null,
   }));
-}
+}, { name: 'searchPlacesNearby', run_type: 'tool' });
 
 async function generateCitySummary(city) {
   if (!city || !GEMINI_API_KEY) return { summary: null, keyFacts: null };
@@ -440,7 +440,7 @@ async function generateNeighborhoodSummary(neighborhood, city) {
   return { summary: null, keyFacts: null };
 }
 
-async function buildAreaContext({ latitude, longitude, durationMinutes, redisClient = null }) {
+const buildAreaContext = traceable(async ({ latitude, longitude, durationMinutes, redisClient = null }) => {
   debugLog('buildAreaContext: start', { latitude, longitude, durationMinutes });
 
   // Run geocoding and POI search in parallel
@@ -478,7 +478,7 @@ async function buildAreaContext({ latitude, longitude, durationMinutes, redisCli
   });
 
   return areaContext;
-}
+}, { name: 'buildAreaContext', run_type: 'tool' });
 
 function heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois }) {
   if (!pois || pois.length === 0) {
@@ -1064,6 +1064,39 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   };
 }
 
+// Helper function to get walking directions from Google Maps
+const getWalkingDirections = traceable(async (origin, destination, waypoints = null) => {
+  const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+  url.searchParams.set('origin', origin);
+  url.searchParams.set('destination', destination);
+  if (waypoints) url.searchParams.set('waypoints', waypoints);
+  url.searchParams.set('mode', 'walking');
+  url.searchParams.set('key', GOOGLE_MAPS_API_KEY);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+  try {
+    const response = await fetch(url.toString(), {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'HearAndThere/1.0'
+      }
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Directions API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}, { name: 'getWalkingDirections', run_type: 'tool' });
+
 async function validateWalkingTimes(tours, startLatitude, startLongitude, redisClient = null) {
   if (!GOOGLE_MAPS_API_KEY || !Array.isArray(tours) || tours.length === 0) {
     console.warn('[tourGeneration] Cannot validate walking times - missing API key or no tours');
@@ -1082,42 +1115,17 @@ async function validateWalkingTimes(tours, startLatitude, startLongitude, redisC
       // Include the user's starting position as the origin
       const origin = `${startLatitude},${startLongitude}`;
       const destination = `${tour.stops[tour.stops.length - 1].latitude},${tour.stops[tour.stops.length - 1].longitude}`;
-      
+
       // Build waypoints including ALL tour stops except the last one
-      let waypoints = '';
+      let waypoints = null;
       if (tour.stops.length > 1) {
         const waypointCoords = tour.stops.slice(0, -1).map(stop => `${stop.latitude},${stop.longitude}`);
         waypoints = waypointCoords.join('|');
       }
 
-      const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
-      url.searchParams.set('origin', origin);
-      url.searchParams.set('destination', destination);
-      if (waypoints) url.searchParams.set('waypoints', waypoints);
-      url.searchParams.set('mode', 'walking');
-      url.searchParams.set('key', GOOGLE_MAPS_API_KEY);
-
       console.log('[tourGeneration] Validating walking times for tour:', tour.id);
-      
-      // Add timeout and retry logic
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      const response = await fetch(url.toString(), { 
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'HearAndThere/1.0'
-        }
-      });
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        console.warn('[tourGeneration] Directions API failed for tour', tour.id, response.status);
-        validatedTours.push(tour);
-        continue;
-      }
 
-      const data = await response.json();
+      const data = await getWalkingDirections(origin, destination, waypoints);
       if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
         console.warn('[tourGeneration] No valid route found for tour', tour.id, 'API status:', data.status);
         validatedTours.push(tour);
