@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
-const FRONTEND_VERSION = '1.0.9'; // Update this with each commit
+const FRONTEND_VERSION = '1.0.10'; // Update this with each commit
 
 type TourStop = {
   name: string
@@ -954,12 +954,12 @@ function App() {
               <p className="text-xs text-emerald-700 mb-6">
                 Your personalized audioguide is being generated. Click the button below to view your tour page.
               </p>
-              <a
-                href={`/tour/${shareableTourId}`}
+              <button
+                onClick={() => window.location.href = `/tour/${shareableTourId}`}
                 className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
               >
                 🎧 Take me to my audiotour
-              </a>
+              </button>
               <p className="text-xs text-slate-500 mt-4">
                 You can share this link with others!
               </p>

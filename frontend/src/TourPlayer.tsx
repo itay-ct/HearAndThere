@@ -3,11 +3,13 @@ import { useParams } from 'react-router-dom'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+const FRONTEND_VERSION = '1.0.10' // Update this with each commit
 
 interface Stop {
   name: string
-  placeId: string
-  location: { lat: number; lng: number }
+  placeId?: string
+  latitude: number
+  longitude: number
   dwellMinutes: number
   walkMinutesFromPrevious: number
   walkingDirections?: {
@@ -57,6 +59,8 @@ interface TourData {
   theme: string
   estimatedTotalMinutes: number
   language: string
+  startLatitude?: number
+  startLongitude?: number
   tour?: Tour
   scripts?: Scripts
   audioFiles?: AudioFiles
@@ -71,6 +75,11 @@ export default function TourPlayer() {
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null)
   const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set())
   const [expandedDirections, setExpandedDirections] = useState<Set<number>>(new Set())
+  const [feedback, setFeedback] = useState<string>('')
+  const [rating, setRating] = useState<number>(0)
+  const [hoveredRating, setHoveredRating] = useState<number>(0)
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<google.maps.Map | null>(null)
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
@@ -122,33 +131,134 @@ export default function TourPlayer() {
         })
       }
 
+      // Determine map center (starting point if available, otherwise first stop)
+      const centerLat = tourData.startLatitude ?? tourData.tour.stops[0].latitude
+      const centerLng = tourData.startLongitude ?? tourData.tour.stops[0].longitude
+
       const map = new google.maps.Map(mapRef.current!, {
         zoom: 14,
-        center: tourData.tour.stops[0].location,
+        center: { lat: centerLat, lng: centerLng },
       })
 
       mapInstanceRef.current = map
 
+      // Add starting point marker if available
+      if (tourData.startLatitude && tourData.startLongitude) {
+        new google.maps.Marker({
+          position: { lat: tourData.startLatitude, lng: tourData.startLongitude },
+          map,
+          title: 'Starting Point',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#10b981',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+          },
+        })
+      }
+
       // Add markers for each stop
       tourData.tour.stops.forEach((stop, index) => {
         new google.maps.Marker({
-          position: stop.location,
+          position: { lat: stop.latitude, lng: stop.longitude },
           map,
           label: `${index + 1}`,
           title: stop.name,
         })
       })
 
-      // Draw route
-      const path = tourData.tour.stops.map(stop => stop.location)
-      new google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeColor: '#f36f5e',
-        strokeOpacity: 1.0,
-        strokeWeight: 3,
-        map,
-      })
+      // Use Directions API to draw actual walking route (not straight lines)
+      if (tourData.startLatitude && tourData.startLongitude && tourData.tour.stops.length > 0) {
+        const directionsService = new google.maps.DirectionsService()
+        const directionsRenderer = new google.maps.DirectionsRenderer({
+          suppressMarkers: true, // We're using custom markers
+          polylineOptions: {
+            strokeColor: '#f36f5e',
+            strokeWeight: 4,
+            strokeOpacity: 0.8,
+          }
+        })
+
+        directionsRenderer.setMap(map)
+
+        // Build waypoints (all stops except the last one)
+        const waypoints = tourData.tour.stops.slice(0, -1).map(stop => ({
+          location: { lat: stop.latitude, lng: stop.longitude },
+          stopover: true,
+        }))
+
+        // Request directions from starting point through all stops
+        const request = {
+          origin: { lat: tourData.startLatitude, lng: tourData.startLongitude },
+          destination: {
+            lat: tourData.tour.stops[tourData.tour.stops.length - 1].latitude,
+            lng: tourData.tour.stops[tourData.tour.stops.length - 1].longitude
+          },
+          waypoints: waypoints,
+          travelMode: google.maps.TravelMode.WALKING,
+        }
+
+        directionsService.route(request, (result, status) => {
+          if (status === 'OK' && result) {
+            directionsRenderer.setDirections(result)
+            console.log('[TourPlayer] Walking route loaded successfully')
+          } else {
+            console.error('[TourPlayer] Directions request failed:', status)
+            // Fallback to simple polyline if directions fail
+            const path = []
+            path.push({ lat: tourData.startLatitude!, lng: tourData.startLongitude! })
+            path.push(...tourData.tour!.stops.map(stop => ({ lat: stop.latitude, lng: stop.longitude })))
+
+            new google.maps.Polyline({
+              path,
+              geodesic: true,
+              strokeColor: '#f36f5e',
+              strokeOpacity: 1.0,
+              strokeWeight: 3,
+              map,
+            })
+          }
+        })
+      } else if (tourData.tour.stops.length > 0) {
+        // No starting point, just draw route between stops
+        const directionsService = new google.maps.DirectionsService()
+        const directionsRenderer = new google.maps.DirectionsRenderer({
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: '#f36f5e',
+            strokeWeight: 4,
+            strokeOpacity: 0.8,
+          }
+        })
+
+        directionsRenderer.setMap(map)
+
+        const waypoints = tourData.tour.stops.slice(1, -1).map(stop => ({
+          location: { lat: stop.latitude, lng: stop.longitude },
+          stopover: true,
+        }))
+
+        const request = {
+          origin: { lat: tourData.tour.stops[0].latitude, lng: tourData.tour.stops[0].longitude },
+          destination: {
+            lat: tourData.tour.stops[tourData.tour.stops.length - 1].latitude,
+            lng: tourData.tour.stops[tourData.tour.stops.length - 1].longitude
+          },
+          waypoints: waypoints,
+          travelMode: google.maps.TravelMode.WALKING,
+        }
+
+        directionsService.route(request, (result, status) => {
+          if (status === 'OK' && result) {
+            directionsRenderer.setDirections(result)
+            console.log('[TourPlayer] Walking route loaded successfully')
+          } else {
+            console.error('[TourPlayer] Directions request failed:', status)
+          }
+        })
+      }
     }
 
     loadMap()
@@ -195,6 +305,34 @@ export default function TourPlayer() {
         audio.play()
       }
       setCurrentlyPlaying(key)
+    }
+  }
+
+  const handleSubmitFeedback = async () => {
+    if (!tourId || !rating) return
+
+    setFeedbackSubmitting(true)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tour/${tourId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rating,
+          feedback: feedback.trim() || null,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to submit feedback')
+      }
+
+      setFeedbackSubmitted(true)
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+      alert('Failed to submit feedback. Please try again.')
+    } finally {
+      setFeedbackSubmitting(false)
     }
   }
 
@@ -283,11 +421,11 @@ export default function TourPlayer() {
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
             <h2 className="text-xl font-semibold text-slate-900 mb-6">🎧 Audioguide</h2>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               {/* Intro */}
               {tourData.audioFiles.intro && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-center gap-3 mb-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-3">
                     {tourData.audioFiles.intro.status === 'generating' ? (
                       <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
                     ) : tourData.audioFiles.intro.url ? (
@@ -302,21 +440,60 @@ export default function TourPlayer() {
                       <h3 className="text-sm font-semibold text-slate-900">Introduction</h3>
                       <p className="text-xs text-slate-500">Welcome to your tour</p>
                     </div>
-                  </div>
-
-                  {tourData.scripts?.intro && (
-                    <div className="mt-3">
+                    {tourData.scripts?.intro && (
                       <button
                         onClick={() => toggleScript('intro')}
-                        className="text-xs text-sky-600 hover:text-sky-800 font-medium"
+                        className="text-[10px] text-slate-400 hover:text-slate-600 transition"
                       >
-                        {expandedScripts.has('intro') ? '▼ Hide script' : '▶ Show script'}
+                        {expandedScripts.has('intro') ? 'hide script' : 'show script'}
                       </button>
-                      {expandedScripts.has('intro') && (
-                        <div className="mt-2 p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
-                          {tourData.scripts.intro.content}
+                    )}
+                  </div>
+
+                  {tourData.scripts?.intro && expandedScripts.has('intro') && (
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
+                        {tourData.scripts.intro.content}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Walking Directions from Starting Point to First Stop */}
+              {tourData.tour && tourData.tour.stops.length > 0 && tourData.tour.stops[0].walkingDirections && (
+                <div className="my-4 mx-8">
+                  <button
+                    onClick={() => toggleDirections(-1)}
+                    className="text-[10px] text-emerald-500 hover:text-emerald-700 transition flex items-center gap-1"
+                  >
+                    <span>{expandedDirections.has(-1) ? '▼' : '▶'}</span>
+                    <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to first stop'}</span>
+                  </button>
+                  {expandedDirections.has(-1) && (
+                    <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50 shadow-sm">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-lg">🚶</span>
+                        <div>
+                          <p className="text-xs text-emerald-900 font-semibold">
+                            Walking to {tourData.tour.stops[0].name}
+                          </p>
+                          <p className="text-[10px] text-emerald-700">
+                            {tourData.tour.stops[0].walkingDirections.distance} · {tourData.tour.stops[0].walkingDirections.duration}
+                          </p>
                         </div>
-                      )}
+                      </div>
+                      <ol className="space-y-2 pl-1">
+                        {tourData.tour.stops[0].walkingDirections.steps.map((step, stepIdx) => (
+                          <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
+                            <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
+                            <div className="flex-1">
+                              <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
+                              <span className="text-emerald-600 ml-1">({step.distance})</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
                     </div>
                   )}
                 </div>
@@ -329,67 +506,78 @@ export default function TourPlayer() {
                 const audioKey = `stop-${index}`
 
                 return (
-                  <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      {audioFile?.status === 'generating' ? (
-                        <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                      ) : audioFile?.url ? (
-                        <button
-                          onClick={() => handlePlayPause(audioKey, audioFile.url!)}
-                          className="w-8 h-8 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
-                        >
-                          {currentlyPlaying === audioKey ? '⏸' : '▶'}
-                        </button>
-                      ) : null}
-                      <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-slate-900">
-                          {index + 1}. {stop.name}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Dwell {stop.dwellMinutes} min
-                        </p>
-                      </div>
-                    </div>
-
-                    {script && (
-                      <div className="mt-3">
-                        <button
-                          onClick={() => toggleScript(audioKey)}
-                          className="text-xs text-sky-600 hover:text-sky-800 font-medium"
-                        >
-                          {expandedScripts.has(audioKey) ? '▼ Hide script' : '▶ Show script'}
-                        </button>
-                        {expandedScripts.has(audioKey) && (
-                          <div className="mt-2 p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
-                            {script.content}
-                          </div>
+                  <div key={index}>
+                    {/* Stop Card */}
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        {audioFile?.status === 'generating' ? (
+                          <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                        ) : audioFile?.url ? (
+                          <button
+                            onClick={() => handlePlayPause(audioKey, audioFile.url!)}
+                            className="w-8 h-8 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
+                          >
+                            {currentlyPlaying === audioKey ? '⏸' : '▶'}
+                          </button>
+                        ) : null}
+                        <div className="flex-1">
+                          <h3 className="text-sm font-semibold text-slate-900">
+                            {index + 1}. {stop.name}
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            Dwell {stop.dwellMinutes} min
+                          </p>
+                        </div>
+                        {script && (
+                          <button
+                            onClick={() => toggleScript(audioKey)}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 transition"
+                          >
+                            {expandedScripts.has(audioKey) ? 'hide script' : 'show script'}
+                          </button>
                         )}
                       </div>
-                    )}
 
+                      {script && expandedScripts.has(audioKey) && (
+                        <div className="mt-3 pt-3 border-t border-slate-100">
+                          <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
+                            {script.content}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Walking Directions - Floating between stops */}
                     {stop.walkingDirections && index < tourData.tour!.stops.length - 1 && (
-                      <div className="mt-3">
+                      <div className="my-4 mx-8">
                         <button
                           onClick={() => toggleDirections(index)}
-                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium"
+                          className="text-[10px] text-emerald-500 hover:text-emerald-700 transition flex items-center gap-1"
                         >
-                          {expandedDirections.has(index) ? '▼ Hide directions' : '▶ Show directions to next stop'}
+                          <span>{expandedDirections.has(index) ? '▼' : '▶'}</span>
+                          <span>{expandedDirections.has(index) ? 'hide directions' : 'show walking directions'}</span>
                         </button>
                         {expandedDirections.has(index) && (
-                          <div className="mt-2 p-3 bg-emerald-50 rounded-lg">
-                            <p className="text-xs text-emerald-900 font-semibold mb-2">
-                              Walking to {tourData.tour!.stops[index + 1].name}
-                            </p>
-                            <p className="text-xs text-emerald-700 mb-2">
-                              {stop.walkingDirections.distance} · {stop.walkingDirections.duration}
-                            </p>
-                            <ol className="space-y-1">
+                          <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-lg">🚶</span>
+                              <div>
+                                <p className="text-xs text-emerald-900 font-semibold">
+                                  Walking to {tourData.tour!.stops[index + 1].name}
+                                </p>
+                                <p className="text-[10px] text-emerald-700">
+                                  {stop.walkingDirections.distance} · {stop.walkingDirections.duration}
+                                </p>
+                              </div>
+                            </div>
+                            <ol className="space-y-2 pl-1">
                               {stop.walkingDirections.steps.map((step, stepIdx) => (
-                                <li key={stepIdx} className="text-xs text-emerald-800">
-                                  <span className="font-semibold">{stepIdx + 1}.</span>{' '}
-                                  <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
-                                  {' '}
-                                  <span className="text-emerald-600">({step.distance})</span>
+                                <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
+                                  <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
+                                  <div className="flex-1">
+                                    <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
+                                    <span className="text-emerald-600 ml-1">({step.distance})</span>
+                                  </div>
                                 </li>
                               ))}
                             </ol>
@@ -403,6 +591,95 @@ export default function TourPlayer() {
             </div>
           </div>
         )}
+
+        {/* Feedback Section */}
+        {tourData.status === 'complete' && (
+          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">💬 Share Your Feedback</h2>
+
+            {!feedbackSubmitted ? (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-600">
+                  How was your experience with this audioguide? Your feedback helps us improve!
+                </p>
+
+                {/* Star Rating */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Rating</label>
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setRating(star)}
+                        onMouseEnter={() => setHoveredRating(star)}
+                        onMouseLeave={() => setHoveredRating(0)}
+                        disabled={feedbackSubmitting}
+                        className="text-3xl transition-all duration-150 hover:scale-110 disabled:cursor-not-allowed"
+                      >
+                        {star <= (hoveredRating || rating) ? (
+                          <span className="text-yellow-400">★</span>
+                        ) : (
+                          <span className="text-slate-300">☆</span>
+                        )}
+                      </button>
+                    ))}
+                    {rating > 0 && (
+                      <span className="ml-2 text-sm text-slate-600">
+                        {rating} {rating === 1 ? 'star' : 'stars'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Feedback Text (Optional) */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Comments <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    placeholder="Share your thoughts about the tour, audio quality, directions, or anything else..."
+                    className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent resize-none"
+                    rows={4}
+                    disabled={feedbackSubmitting}
+                  />
+                </div>
+
+                <button
+                  onClick={handleSubmitFeedback}
+                  disabled={!rating || feedbackSubmitting}
+                  className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {feedbackSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                      Submitting...
+                    </>
+                  ) : (
+                    'Submit Feedback'
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
+                <p className="text-sm font-semibold text-emerald-900 mb-2">✓ Thank you!</p>
+                <p className="text-xs text-emerald-700">
+                  Your feedback has been submitted and will help us improve future tours.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Version Display */}
+        <div className="mt-8 text-center space-y-1">
+          {tourData && (
+            <p className="text-xs text-slate-300 font-light">{tourData.tourId}</p>
+          )}
+          <p className="text-xs text-slate-300 font-light">v{FRONTEND_VERSION}</p>
+        </div>
       </div>
     </div>
   )

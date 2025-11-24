@@ -266,9 +266,9 @@ async function start() {
       const shareableTourId = uuidv4();
       console.log('[api] Generated shareable tour ID:', shareableTourId);
 
-      // Store tour data under the shareable tour ID
+      // Store tour data under the shareable tour ID as JSON
       const tourDataKey = `tour:${shareableTourId}`;
-      await redisClient.hSet(tourDataKey, {
+      const tourDocument = {
         tourId: shareableTourId,
         sessionId, // Keep reference for debugging
         originalTourId: tourId,
@@ -279,9 +279,18 @@ async function start() {
         theme: selectedTour.theme,
         estimatedTotalMinutes: selectedTour.estimatedTotalMinutes,
         language,
-        tourData: JSON.stringify(selectedTour),
-        areaContext: JSON.stringify(areaContext),
-      });
+        // Store starting point coordinates
+        startLatitude: parseFloat(sessionData.latitude),
+        startLongitude: parseFloat(sessionData.longitude),
+        // Store full tour data with stops and walking directions
+        tour: selectedTour,
+        areaContext,
+        // Placeholders for scripts and audio files (will be added when generation completes)
+        scripts: null,
+        audioFiles: null,
+      };
+
+      await redisClient.json.set(tourDataKey, '$', tourDocument);
 
       // Start audioguide generation (async)
       console.log('[api] Starting audioguide generation for shareable tour:', shareableTourId, 'language:', language);
@@ -305,18 +314,15 @@ async function start() {
       }).then(async (result) => {
         console.log('[api] Audioguide generation completed for tour:', shareableTourId);
 
-        // Store the result in Redis
-        await redisClient.hSet(tourDataKey, {
-          status: 'complete',
-          completedAt: new Date().toISOString(),
-        });
+        // Update the tour document with completion status, scripts, and audio files
+        await redisClient.json.set(tourDataKey, '$.status', 'complete');
+        await redisClient.json.set(tourDataKey, '$.completedAt', new Date().toISOString());
 
-        // Store scripts and audio files as JSON
         if (result.scripts) {
-          await redisClient.json.set(`${tourDataKey}:scripts`, '$', result.scripts);
+          await redisClient.json.set(tourDataKey, '$.scripts', result.scripts);
         }
         if (result.audioFiles) {
-          await redisClient.json.set(`${tourDataKey}:audioFiles`, '$', result.audioFiles);
+          await redisClient.json.set(tourDataKey, '$.audioFiles', result.audioFiles);
         }
 
         console.log('[api] Audioguide data saved to Redis for shareable tour:', shareableTourId);
@@ -324,11 +330,9 @@ async function start() {
         console.error('[api] Audioguide generation failed for tour:', shareableTourId, err);
 
         // Mark as failed
-        await redisClient.hSet(tourDataKey, {
-          status: 'failed',
-          error: err.message,
-          failedAt: new Date().toISOString(),
-        });
+        await redisClient.json.set(tourDataKey, '$.status', 'failed');
+        await redisClient.json.set(tourDataKey, '$.error', err.message || 'audioguide-generation-failed');
+        await redisClient.json.set(tourDataKey, '$.failedAt', new Date().toISOString());
       });
 
     } catch (err) {
@@ -394,59 +398,122 @@ async function start() {
     const tourDataKey = `tour:${tourId}`;
 
     try {
-      const tourData = await redisClient.hGetAll(tourDataKey);
+      // Read tour data from JSON
+      const tourDataArray = await redisClient.json.get(tourDataKey, { path: '$' });
 
-      if (!tourData || Object.keys(tourData).length === 0) {
+      if (!tourDataArray || !Array.isArray(tourDataArray) || tourDataArray.length === 0) {
         return res.status(404).json({ error: 'tour-not-found' });
       }
 
-      const response = {
-        tourId,
-        status: tourData.status || 'unknown',
-        title: tourData.title || null,
-        abstract: tourData.abstract || null,
-        theme: tourData.theme || null,
-        estimatedTotalMinutes: tourData.estimatedTotalMinutes ? parseInt(tourData.estimatedTotalMinutes) : null,
-        language: tourData.language || 'english',
-        startedAt: tourData.startedAt || null,
-        completedAt: tourData.completedAt || null,
-        error: tourData.error || null,
-      };
+      const tourData = tourDataArray[0];
 
-      // Parse tour data and area context
-      if (tourData.tourData) {
-        try {
-          response.tour = JSON.parse(tourData.tourData);
-        } catch (err) {
-          console.warn('[api] Failed to parse tour data', err);
-        }
-      }
-
-      if (tourData.areaContext) {
-        try {
-          response.areaContext = JSON.parse(tourData.areaContext);
-        } catch (err) {
-          console.warn('[api] Failed to parse area context', err);
-        }
-      }
-
-      // If complete, load scripts and audio files
-      if (tourData.status === 'complete') {
-        try {
-          const scriptsData = await redisClient.json.get(`${tourDataKey}:scripts`, { path: '$' });
-          const audioFilesData = await redisClient.json.get(`${tourDataKey}:audioFiles`, { path: '$' });
-
-          response.scripts = Array.isArray(scriptsData) && scriptsData.length > 0 ? scriptsData[0] : null;
-          response.audioFiles = Array.isArray(audioFilesData) && audioFilesData.length > 0 ? audioFilesData[0] : null;
-        } catch (err) {
-          console.warn('[api] Failed to load audioguide data from Redis', err);
-        }
-      }
-
-      res.json(response);
+      // Return the complete tour document (includes tour, scripts, audioFiles, etc.)
+      res.json(tourData);
     } catch (err) {
       console.error('Error fetching tour data', err);
       res.status(500).json({ error: 'failed-to-fetch-tour-data' });
+    }
+  });
+
+  // Get feedback for a tour
+  app.get('/api/tour/:tourId/feedback', async (req, res) => {
+    const { tourId } = req.params;
+
+    if (!tourId) {
+      return res.status(400).json({ error: 'tourId is required' });
+    }
+
+    const feedbackKey = `tour:${tourId}:feedback`;
+
+    try {
+      const feedbackData = await redisClient.json.get(feedbackKey, { path: '$' });
+
+      let feedback = [];
+      if (feedbackData !== null && Array.isArray(feedbackData) && feedbackData.length > 0) {
+        feedback = feedbackData[0];
+      }
+
+      res.json({
+        tourId,
+        feedback,
+        count: Array.isArray(feedback) ? feedback.length : 0
+      });
+    } catch (err) {
+      console.error('Error fetching feedback', err);
+      res.status(500).json({ error: 'failed-to-fetch-feedback' });
+    }
+  });
+
+  // Submit feedback for a tour
+  app.post('/api/tour/:tourId/feedback', async (req, res) => {
+    const { tourId } = req.params;
+    const { rating, feedback } = req.body;
+
+    if (!tourId) {
+      return res.status(400).json({ error: 'tourId is required' });
+    }
+
+    if (!rating || typeof rating !== 'number' || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'rating is required and must be between 1 and 5' });
+    }
+
+    const tourDataKey = `tour:${tourId}`;
+
+    try {
+      // Check if tour exists
+      const tourExists = await redisClient.exists(tourDataKey);
+      if (!tourExists) {
+        return res.status(404).json({ error: 'tour-not-found' });
+      }
+
+      // Get existing feedback array or create new one
+      const feedbackKey = `${tourDataKey}:feedback`;
+      let feedbackArray = [];
+
+      try {
+        const existingFeedback = await redisClient.json.get(feedbackKey, { path: '$' });
+        console.log('[api] Existing feedback retrieved:', existingFeedback);
+
+        if (existingFeedback !== null) {
+          // Redis JSON returns the value wrapped in an array when using path '$'
+          if (Array.isArray(existingFeedback) && existingFeedback.length > 0) {
+            feedbackArray = Array.isArray(existingFeedback[0]) ? existingFeedback[0] : [];
+          }
+        }
+      } catch (err) {
+        // Feedback doesn't exist yet, that's okay
+        console.log('[api] No existing feedback, creating new array:', err.message);
+      }
+
+      // Add new feedback with timestamp
+      const feedbackEntry = {
+        rating,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Add optional feedback text if provided
+      if (feedback && typeof feedback === 'string' && feedback.trim()) {
+        feedbackEntry.feedback = feedback.trim();
+      }
+
+      feedbackArray.push(feedbackEntry);
+
+      console.log('[api] Feedback array before saving:', feedbackArray);
+
+      // Store updated feedback array
+      await redisClient.json.set(feedbackKey, '$', feedbackArray);
+
+      console.log(`[api] Feedback saved to Redis at key: ${feedbackKey}`);
+      console.log(`[api] Feedback entry:`, feedbackEntry);
+
+      // Verify it was saved
+      const verification = await redisClient.json.get(feedbackKey, { path: '$' });
+      console.log('[api] Verification - feedback after save:', verification);
+
+      res.json({ success: true, message: 'Feedback submitted successfully' });
+    } catch (err) {
+      console.error('Error submitting feedback', err);
+      res.status(500).json({ error: 'failed-to-submit-feedback' });
     }
   });
 

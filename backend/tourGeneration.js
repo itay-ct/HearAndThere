@@ -1155,11 +1155,16 @@ async function validateWalkingTimes(tours, startLatitude, startLongitude, redisC
 
         // Extract walking directions with street names
         if (leg.steps && leg.steps.length > 0) {
-          updatedStop.walkingDirections = leg.steps.map(step => ({
-            instruction: step.html_instructions?.replace(/<[^>]*>/g, '') || '', // Strip HTML tags
-            distance: step.distance?.text || '',
-            duration: step.duration?.text || '',
-          }));
+          // Store walking directions as an object with distance, duration, and steps array
+          updatedStop.walkingDirections = {
+            distance: leg.distance?.text || '',
+            duration: leg.duration?.text || '',
+            steps: leg.steps.map(step => ({
+              instruction: step.html_instructions || '', // Keep HTML for proper display
+              distance: step.distance?.text || '',
+              duration: step.duration?.text || '',
+            }))
+          };
 
           // Extract street names from the steps
           const streetNames = leg.steps

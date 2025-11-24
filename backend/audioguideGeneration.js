@@ -160,7 +160,7 @@ async function generateStopScript({ stop, stopIndex, totalStops, tour, areaConte
     const walkTime = nextStop.walkMinutesFromPrevious || 0;
     const distance = nextStop.distanceMeters ? `${Math.round(nextStop.distanceMeters)}m` : '';
     const streetNames = nextStop.streetNames || [];
-    const directions = nextStop.walkingDirections || [];
+    const walkingDirections = nextStop.walkingDirections;
 
     walkingContext = `\n\nWalking Directions to Next Stop (${nextStop.name}):
 - Walking time: ${walkTime} minute${walkTime !== 1 ? 's' : ''}${distance ? ` (${distance})` : ''}`;
@@ -169,8 +169,8 @@ async function generateStopScript({ stop, stopIndex, totalStops, tour, areaConte
       walkingContext += `\n- Streets you'll walk on: ${streetNames.join(', ')}`;
     }
 
-    if (directions.length > 0) {
-      walkingContext += `\n- Turn-by-turn directions:\n${directions.map((d, i) => `  ${i + 1}. ${d.instruction} (${d.distance})`).join('\n')}`;
+    if (walkingDirections && walkingDirections.steps && walkingDirections.steps.length > 0) {
+      walkingContext += `\n- Turn-by-turn directions:\n${walkingDirections.steps.map((d, i) => `  ${i + 1}. ${d.instruction.replace(/<[^>]*>/g, '')} (${d.distance})`).join('\n')}`;
     }
   }
 
@@ -220,6 +220,34 @@ ${isLast ? 'End with a memorable closing that thanks them and wishes them well.'
  * and upload to Google Cloud Storage
  */
 async function synthesizeAudio({ text, outputFileName, language }) {
+  // Google TTS has a 5000 byte limit for text input
+  const MAX_BYTES = 4998; // Leave small buffer
+
+  // Check byte length and trim if necessary
+  let processedText = text;
+  const textBytes = Buffer.byteLength(text, 'utf8');
+
+  if (textBytes > MAX_BYTES) {
+    console.warn(`[audioguide] WARNING: Script exceeds TTS limit!`);
+    console.warn(`[audioguide] File: ${outputFileName}`);
+    console.warn(`[audioguide] Original size: ${textBytes} bytes (limit: 5000 bytes)`);
+
+    // Trim text to fit within byte limit
+    // We need to trim by bytes, not characters, to handle multi-byte UTF-8 characters
+    let trimmedText = text;
+    while (Buffer.byteLength(trimmedText, 'utf8') > MAX_BYTES) {
+      // Remove last 10% of characters and try again
+      const newLength = Math.floor(trimmedText.length * 0.9);
+      trimmedText = trimmedText.substring(0, newLength);
+    }
+
+    // Add ellipsis to indicate truncation
+    processedText = trimmedText.trim() + '...';
+
+    const finalBytes = Buffer.byteLength(processedText, 'utf8');
+    console.warn(`[audioguide] Trimmed to: ${finalBytes} bytes (${Math.round((finalBytes/textBytes)*100)}% of original)`);
+  }
+
   // Select voice based on language
   const voiceConfig = language === 'hebrew'
     ? {
@@ -232,7 +260,7 @@ async function synthesizeAudio({ text, outputFileName, language }) {
       };
 
   const requestBody = {
-    input: { text },
+    input: { text: processedText },
     voice: voiceConfig,
     audioConfig: {
       audioEncoding: 'MP3',
