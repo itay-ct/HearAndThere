@@ -162,6 +162,7 @@ async function cachePlaceInRedis(redisClient, place) {
         lon: place.longitude
       },
       rating: place.rating,
+      primary: place.primary !== undefined ? place.primary : true, // Default to true for backward compatibility
       source: 'google_places_api',
       fetched_at: new Date().toISOString(),
       pinned: existingPlace?.pinned || false,
@@ -199,6 +200,147 @@ async function cachePlaceInRedis(redisClient, place) {
   }
 }
 
+/**
+ * Query POIs from Redis with intelligent fallback logic
+ * 1. Query primary POIs within radiusMeters
+ * 2. If < 40, query all POIs within radiusMeters
+ * 3. If still < 40, query all POIs within radiusMeters * 1.5
+ * All queries sorted by distance
+ */
+const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
+  if (!redisClient) {
+    console.warn('[tourGeneration] No Redis client available for POI query');
+    return [];
+  }
+
+  const geoKey = 'geo:pois';
+
+  try {
+    console.log(`[tourGeneration] Querying Redis for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
+
+    // Step 1: Query primary POIs within radiusMeters
+    let poiIds = await redisClient.geoRadius(
+      geoKey,
+      { longitude, latitude },
+      radiusMeters,
+      'm',
+      { SORT: 'ASC', COUNT: 100 } // Get up to 100, sorted by distance
+    );
+
+    console.log(`[tourGeneration] Found ${poiIds.length} POIs within ${radiusMeters}m`);
+
+    // Fetch full POI documents
+    let pois = [];
+    const expiredPoiIds = []; // Track expired POIs for cleanup
+    for (const poiId of poiIds) {
+      try {
+        const poiKey = `poi:${poiId}`;
+        const poiDoc = await redisClient.json.get(poiKey, { path: '$' });
+        if (poiDoc && poiDoc[0]) {
+          pois.push({
+            id: poiDoc[0].place_id,
+            name: poiDoc[0].name,
+            latitude: poiDoc[0].location.lat,
+            longitude: poiDoc[0].location.lon,
+            types: poiDoc[0].types || [],
+            rating: poiDoc[0].rating,
+            primary: poiDoc[0].primary
+          });
+        } else {
+          // POI document expired but geo entry still exists
+          expiredPoiIds.push(poiId);
+        }
+      } catch (err) {
+        console.warn(`[tourGeneration] Failed to fetch POI ${poiId}:`, err.message);
+        expiredPoiIds.push(poiId);
+      }
+    }
+
+    // Clean up expired POI entries from geo index
+    if (expiredPoiIds.length > 0) {
+      console.log(`[tourGeneration] Cleaning up ${expiredPoiIds.length} expired POI entries from geo index`);
+      try {
+        await redisClient.zRem(geoKey, expiredPoiIds);
+      } catch (err) {
+        console.warn('[tourGeneration] Failed to clean up expired geo entries:', err.message);
+      }
+    }
+
+    // Filter to primary POIs only
+    let primaryPois = pois.filter(poi => poi.primary === true);
+    console.log(`[tourGeneration] Found ${primaryPois.length} primary POIs`);
+
+    // Step 2: If < 40 primary POIs, include all POIs (primary + secondary)
+    if (primaryPois.length < 40) {
+      console.log(`[tourGeneration] Less than 40 primary POIs, including secondary POIs`);
+      primaryPois = pois; // Use all POIs
+
+      // Step 3: If still < 40, expand radius by 1.5x
+      if (primaryPois.length < 40) {
+        const expandedRadius = Math.round(radiusMeters * 1.5);
+        console.log(`[tourGeneration] Still less than 40 POIs, expanding radius to ${expandedRadius}m`);
+
+        poiIds = await redisClient.geoRadius(
+          geoKey,
+          { longitude, latitude },
+          expandedRadius,
+          'm',
+          { SORT: 'ASC', COUNT: 100 }
+        );
+
+        console.log(`[tourGeneration] Found ${poiIds.length} POIs within ${expandedRadius}m`);
+
+        // Fetch expanded POI documents
+        pois = [];
+        const expiredPoiIdsExpanded = [];
+        for (const poiId of poiIds) {
+          try {
+            const poiKey = `poi:${poiId}`;
+            const poiDoc = await redisClient.json.get(poiKey, { path: '$' });
+            if (poiDoc && poiDoc[0]) {
+              pois.push({
+                id: poiDoc[0].place_id,
+                name: poiDoc[0].name,
+                latitude: poiDoc[0].location.lat,
+                longitude: poiDoc[0].location.lon,
+                types: poiDoc[0].types || [],
+                rating: poiDoc[0].rating,
+                primary: poiDoc[0].primary
+              });
+            } else {
+              expiredPoiIdsExpanded.push(poiId);
+            }
+          } catch (err) {
+            console.warn(`[tourGeneration] Failed to fetch POI ${poiId}:`, err.message);
+            expiredPoiIdsExpanded.push(poiId);
+          }
+        }
+
+        // Clean up expired POI entries from geo index
+        if (expiredPoiIdsExpanded.length > 0) {
+          console.log(`[tourGeneration] Cleaning up ${expiredPoiIdsExpanded.length} expired POI entries from expanded search`);
+          try {
+            await redisClient.zRem(geoKey, expiredPoiIdsExpanded);
+          } catch (err) {
+            console.warn('[tourGeneration] Failed to clean up expired geo entries:', err.message);
+          }
+        }
+
+        primaryPois = pois;
+      }
+    }
+
+    // Return top 40 POIs sorted by distance (already sorted by Redis geoRadius)
+    const result = primaryPois.slice(0, 40);
+    console.log(`[tourGeneration] Returning ${result.length} POIs for tour generation`);
+    return result;
+
+  } catch (err) {
+    console.error('[tourGeneration] Failed to query POIs from Redis:', err);
+    return [];
+  }
+}, { name: 'queryPoisFromRedis', run_type: 'tool' });
+
 const searchNearbyPois = traceable(async (latitude, longitude, durationMinutes = 90, redisClient = null) => {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[tourGeneration] GOOGLE_MAPS_API_KEY is not set; skipping POI search.');
@@ -218,98 +360,98 @@ const searchNearbyPois = traceable(async (latitude, longitude, durationMinutes =
 
   console.log(`[tourGeneration] POI search radius: ${radiusMeters}m (based on ${durationMinutes} min tour)`);
 
-  
-  const primaryTypes = [
-  'historical_place',
-  'historical_landmark',
-  'monument',
-  'cultural_landmark',
-  'museum',
-  'art_gallery',
-  'sculpture',
-  'performing_arts_theater',
-  'auditorium',
-  'cultural_center',
-  'park',
-  'botanical_garden',
-  'plaza',
-  'garden',
-  'visitor_center',
-  'ice_cream_shop',
-  'bakery',
-  'cafe',
-  'confectionery',
-  'coffee_shop',
-  'church',
-  'hindu_temple',
-  'mosque',
-  'synagogue',
-  'observation_deck',
-  'amphitheatre',
-  'picnic_ground',
-  'wildlife_park',
-  'zoo',
-  'amusement_center',
-  'tourist_attraction',
-  'city_hall',
-  'courthouse',
-  'public_bathroom',
-  'cemetery',
-  'library',
-  'planetarium',
-  'opera_house',
-  'street_art',
-  'landmark',
-  'bridge',
-  'viewpoint',
-  'architecture_landmark'
-];
 
-const secondaryTypes = [
-  'art_studio',
-  'farm',
-  'ranch',
-  'adventure_sports_center',
-  'dog_park',
-  'marina',
-  'roller_coaster',
-  'skateboard_park',
-  'wildlife_refuge',
-  'acai_shop',
-  'bagel_shop',
-  'cat_cafe',
-  'dog_cafe',
-  'juice_shop',
-  'vegan_restaurant',
-  'wine_bar',
-  'local_government_office',
-  'embassy',
-  'apartment_building',
-  'campground',
-  'mobile_home_park',
-  'beach',
-  'playground',
-  'ski_resort',
-  'athletic_field',
-  'ice_skating_rink',
-  'ferry_terminal',
-  'taxi_stand',
-  'transit_depot',
-  'truck_stop',
-  'summer_camp_organizer',
-  'public_bath'
-];
+  // Split primary types into 2 balanced groups to maximize API results (20 per query)
+  const primaryTypesGroup1 = [
+    'historical_place',
+    'historical_landmark',
+    'monument',
+    'cultural_landmark',
+    'museum',
+    'art_gallery',
+    'sculpture',
+    'performing_arts_theater',
+    'cultural_center',
+    'park',
+    'botanical_garden',
+    'plaza',
+    'garden',
+    'visitor_center',
+    'church',
+    'hindu_temple',
+    'mosque',
+    'synagogue',
+    'observation_deck',
+    'wildlife_park',
+    'zoo',
+    'amusement_center'
+  ];
+
+  const primaryTypesGroup2 = [
+    'tourist_attraction',
+    'city_hall',
+    'courthouse',
+    'public_bathroom',
+    'cemetery',
+    'library',
+    'planetarium',
+    'opera_house',
+    'street_art',
+    'landmark',
+    'bridge',
+    'aquarium',
+    'viewpoint',
+    'architecture_landmark',
+    'marina',
+    'art_studio',
+    'local_government_office',
+    'beach',
+    'farm',
+    'ranch'
+  ];
+
+  const secondaryTypes = [
+    'ice_cream_shop',
+    'coffee_shop',
+    'adventure_sports_center',
+    'dog_park',
+    'picnic_ground',
+    'roller_coaster',
+    'skateboard_park',
+    'wildlife_refuge',
+    'acai_shop',
+    'bagel_shop',
+    'cat_cafe',
+    'dog_cafe',
+    'bakery',
+    'cafe',
+    'confectionery',
+    'juice_shop',
+    'vegan_restaurant',
+    'wine_bar',
+    'embassy',
+    'campground',
+    'playground',
+    'ski_resort',
+    'athletic_field',
+    'ice_skating_rink',
+    'ferry_terminal',
+    'public_bath',
+    'restaurant'
+  ];
 
   const allResults = [];
 
-  const [primaryResults, secondaryResults] = await Promise.all([
-    searchPlacesNearby(latitude, longitude, radiusMeters, primaryTypes),
-    searchPlacesNearby(latitude, longitude, radiusMeters, secondaryTypes)
+  // Query primary types in 2 groups (20 results each) + secondary types (20 results)
+  const [primaryResults1, primaryResults2, secondaryResults] = await Promise.all([
+    searchPlacesNearby(latitude, longitude, radiusMeters, primaryTypesGroup1, true),
+    searchPlacesNearby(latitude, longitude, radiusMeters, primaryTypesGroup2, true),
+    searchPlacesNearby(latitude, longitude, radiusMeters, secondaryTypes, false)
   ]);
 
-  allResults.push(...primaryResults, ...secondaryResults);
+  allResults.push(...primaryResults1, ...primaryResults2, ...secondaryResults);
 
-  // Remove duplicates by place_id
+  // Remove duplicates by place_id (keep first occurrence which preserves primary flag)
   const uniqueResults = [];
   const seenIds = new Set();
   for (const place of allResults) {
@@ -330,7 +472,7 @@ const secondaryTypes = [
   return uniqueResults.slice(0, 20);
 }, { name: 'searchNearbyPois', run_type: 'tool' });
 
-const searchPlacesNearby = traceable(async (latitude, longitude, radiusMeters, includedTypes) => {
+const searchPlacesNearby = traceable(async (latitude, longitude, radiusMeters, includedTypes, isPrimary = false) => {
   const url = 'https://places.googleapis.com/v1/places:searchNearby';
   
   const requestBody = {
@@ -376,6 +518,7 @@ const searchPlacesNearby = traceable(async (latitude, longitude, radiusMeters, i
     longitude: place.location?.longitude || longitude,
     types: place.types || [],
     rating: place.rating || null,
+    primary: isPrimary, // Mark as primary or secondary
   }));
 }, { name: 'searchPlacesNearby', run_type: 'tool' });
 
@@ -443,11 +586,26 @@ async function generateNeighborhoodSummary(neighborhood, city) {
 const buildAreaContext = traceable(async ({ latitude, longitude, durationMinutes, redisClient = null }) => {
   debugLog('buildAreaContext: start', { latitude, longitude, durationMinutes });
 
+  // Calculate radius for POI search (same logic as searchNearbyPois)
+  const walkingTimeMinutes = durationMinutes * 0.4;
+  const maxWalkingMeters = walkingTimeMinutes * 83;
+  const calculatedRadius = Math.round(maxWalkingMeters / 2);
+  const radiusMeters = Math.max(500, Math.min(3000, calculatedRadius));
+
   // Run geocoding and POI search in parallel
-  const [{ city, neighborhood }, pois] = await Promise.all([
+  // searchNearbyPois fetches from Google Maps and caches in Redis
+  const [{ city, neighborhood }] = await Promise.all([
     reverseGeocode(latitude, longitude),
-    searchNearbyPois(latitude, longitude, durationMinutes, redisClient), // Pass durationMinutes and redisClient
+    searchNearbyPois(latitude, longitude, durationMinutes, redisClient), // Fetch and cache POIs
   ]);
+
+  // Now query POIs from Redis with intelligent fallback logic
+  // This gives us up to 40 POIs sorted by distance
+  const poisFromRedis = redisClient
+    ? await queryPoisFromRedis(latitude, longitude, radiusMeters, redisClient)
+    : [];
+
+  console.log(`[tourGeneration] Using ${poisFromRedis.length} POIs from Redis for tour generation`);
 
   // Run city and neighborhood summaries in parallel
   const [cityData, neighborhoodData] = await Promise.all([
@@ -458,7 +616,7 @@ const buildAreaContext = traceable(async ({ latitude, longitude, durationMinutes
   const areaContext = {
     city: city || null,
     neighborhood: neighborhood || null,
-    pois,
+    pois: poisFromRedis, // Use POIs from Redis query instead of Google Maps results
     cityData: {
       summary: cityData.summary,
       keyFacts: cityData.keyFacts,
