@@ -16,6 +16,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
+// RediSearch index name for POIs
+const POI_INDEX_NAME = 'idx:pois';
+
 // Add this debug log right after the constants
 console.log('[tourGeneration] Environment check:', {
   GEMINI_API_KEY: !!GEMINI_API_KEY,
@@ -29,6 +32,70 @@ function debugLog(...args) {
   }
 }
 
+/**
+ * Ensure RediSearch index exists for POIs
+ * Creates index if it doesn't exist, safe to call multiple times
+ * This makes the system resilient to Redis flushes
+ */
+async function ensurePoiIndexExists(redisClient) {
+  if (!redisClient) {
+    console.warn('[tourGeneration] No Redis client available for index creation');
+    return false;
+  }
+
+  try {
+    // Check if index already exists
+    try {
+      await redisClient.ft.info(POI_INDEX_NAME);
+      console.log(`[tourGeneration] RediSearch index '${POI_INDEX_NAME}' already exists`);
+      return true;
+    } catch (err) {
+      // Index doesn't exist, create it
+      const errorMsg = err.message || '';
+      if (errorMsg.includes('Unknown index name') || errorMsg.includes('no such index')) {
+        console.log(`[tourGeneration] Creating RediSearch index '${POI_INDEX_NAME}'...`);
+
+        await redisClient.ft.create(
+          POI_INDEX_NAME,
+          {
+            '$.name': {
+              type: 'TEXT',
+              AS: 'name'
+            },
+            '$.types[*]': {
+              type: 'TAG',
+              AS: 'types'
+            },
+            '$.location': {
+              type: 'GEO',
+              AS: 'location'
+            },
+            '$.rating': {
+              type: 'NUMERIC',
+              AS: 'rating'
+            },
+            '$.primary': {
+              type: 'TAG',
+              AS: 'primary'
+            }
+          },
+          {
+            ON: 'JSON',
+            PREFIX: 'poi:'
+          }
+        );
+
+        console.log(`[tourGeneration] ✅ RediSearch index '${POI_INDEX_NAME}' created successfully`);
+        return true;
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {
+    console.error('[tourGeneration] Failed to ensure POI index exists:', err);
+    return false;
+  }
+}
 
 let langGraphModulesPromise;
 async function getLangGraphModules() {
@@ -139,8 +206,7 @@ async function cachePlaceInRedis(redisClient, place) {
   if (!redisClient || !place.id) return;
 
   const placeKey = `poi:${place.id}`;
-  const geoKey = 'geo:pois';
-  
+
   try {
     // Check if place already exists
     let existingPlace = null;
@@ -153,14 +219,12 @@ async function cachePlaceInRedis(redisClient, place) {
     }
     
     // Prepare place document
+    // Note: RediSearch GEO type requires "longitude,latitude" format as a string
     const placeDoc = {
       place_id: place.id,
       name: place.name,
       types: place.types || [],
-      location: {
-        lat: place.latitude,
-        lon: place.longitude
-      },
+      location: `${place.longitude},${place.latitude}`, // GEO format: "lon,lat"
       rating: place.rating,
       primary: place.primary !== undefined ? place.primary : true, // Default to true for backward compatibility
       source: 'google_places_api',
@@ -179,21 +243,17 @@ async function cachePlaceInRedis(redisClient, place) {
       key: placeKey
     });
 
-    // Upsert the place document
+    // Upsert the place document (RediSearch will auto-index it)
     await redisClient.json.set(placeKey, '$', placeDoc);
-    
+
     // Set TTL only if not pinned
     if (!placeDoc.pinned) {
       await redisClient.expire(placeKey, 7 * 24 * 60 * 60); // 7 days
     }
-    
-    // Add to geospatial index
-    await redisClient.geoAdd(geoKey, {
-      longitude: place.longitude,
-      latitude: place.latitude,
-      member: place.id
-    });
-    
+
+    // Note: No need to manually add to geo index - RediSearch handles this automatically
+    // when the index is created with PREFIX 'poi:'
+
     console.log('[tourGeneration] Successfully cached place', place.id);
   } catch (err) {
     console.error('[tourGeneration] Failed to cache place', place.id, err);
@@ -201,11 +261,11 @@ async function cachePlaceInRedis(redisClient, place) {
 }
 
 /**
- * Query POIs from Redis with intelligent fallback logic
+ * Query POIs from Redis using RediSearch with intelligent fallback logic
  * 1. Query primary POIs within radiusMeters
  * 2. If < 40, query all POIs within radiusMeters
  * 3. If still < 40, query all POIs within radiusMeters * 1.5
- * All queries sorted by distance
+ * All queries sorted by distance using RediSearch GEO queries
  */
 const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
   if (!redisClient) {
@@ -213,125 +273,89 @@ const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, r
     return [];
   }
 
-  const geoKey = 'geo:pois';
+  // Ensure index exists (safe to call multiple times)
+  await ensurePoiIndexExists(redisClient);
 
   try {
-    console.log(`[tourGeneration] Querying Redis for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
+    console.log(`[tourGeneration] Querying RediSearch for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
+
+    // Helper function to execute RediSearch geospatial query
+    const searchPois = async (radius, filterPrimary = false) => {
+      // RediSearch GEO query syntax: @location:[lon lat radius unit]
+      // Build query with GEO filter + optional primary filter
+      let query = `@location:[${longitude} ${latitude} ${radius} m]`;
+      if (filterPrimary) {
+        query += ' @primary:{true}';
+      }
+
+      try {
+        console.log(`[tourGeneration] RediSearch query: ${query}`);
+
+        const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
+          LIMIT: {
+            from: 0,
+            size: 100
+          }
+        });
+
+        console.log(`[tourGeneration] RediSearch returned ${results.total} results`);
+
+        // Parse results
+        const pois = [];
+        if (results.documents) {
+          for (const doc of results.documents) {
+            try {
+              // Get full document
+              const poiDoc = await redisClient.json.get(doc.id, { path: '$' });
+              if (poiDoc && poiDoc[0]) {
+                // Parse location string "lon,lat" to extract coordinates
+                const [lon, lat] = poiDoc[0].location.split(',').map(parseFloat);
+
+                pois.push({
+                  id: poiDoc[0].place_id,
+                  name: poiDoc[0].name,
+                  latitude: lat,
+                  longitude: lon,
+                  types: poiDoc[0].types || [],
+                  rating: poiDoc[0].rating,
+                  primary: poiDoc[0].primary
+                });
+              }
+            } catch (err) {
+              console.warn(`[tourGeneration] Failed to parse POI document ${doc.id}:`, err.message);
+            }
+          }
+        }
+
+        return pois;
+      } catch (err) {
+        console.error('[tourGeneration] RediSearch query failed:', err);
+        console.error('[tourGeneration] Query was:', query);
+        return [];
+      }
+    };
 
     // Step 1: Query primary POIs within radiusMeters
-    let poiIds = await redisClient.geoRadius(
-      geoKey,
-      { longitude, latitude },
-      radiusMeters,
-      'm',
-      { SORT: 'ASC', COUNT: 100 } // Get up to 100, sorted by distance
-    );
-
-    console.log(`[tourGeneration] Found ${poiIds.length} POIs within ${radiusMeters}m`);
-
-    // Fetch full POI documents
-    let pois = [];
-    const expiredPoiIds = []; // Track expired POIs for cleanup
-    for (const poiId of poiIds) {
-      try {
-        const poiKey = `poi:${poiId}`;
-        const poiDoc = await redisClient.json.get(poiKey, { path: '$' });
-        if (poiDoc && poiDoc[0]) {
-          pois.push({
-            id: poiDoc[0].place_id,
-            name: poiDoc[0].name,
-            latitude: poiDoc[0].location.lat,
-            longitude: poiDoc[0].location.lon,
-            types: poiDoc[0].types || [],
-            rating: poiDoc[0].rating,
-            primary: poiDoc[0].primary
-          });
-        } else {
-          // POI document expired but geo entry still exists
-          expiredPoiIds.push(poiId);
-        }
-      } catch (err) {
-        console.warn(`[tourGeneration] Failed to fetch POI ${poiId}:`, err.message);
-        expiredPoiIds.push(poiId);
-      }
-    }
-
-    // Clean up expired POI entries from geo index
-    if (expiredPoiIds.length > 0) {
-      console.log(`[tourGeneration] Cleaning up ${expiredPoiIds.length} expired POI entries from geo index`);
-      try {
-        await redisClient.zRem(geoKey, expiredPoiIds);
-      } catch (err) {
-        console.warn('[tourGeneration] Failed to clean up expired geo entries:', err.message);
-      }
-    }
-
-    // Filter to primary POIs only
-    let primaryPois = pois.filter(poi => poi.primary === true);
-    console.log(`[tourGeneration] Found ${primaryPois.length} primary POIs`);
+    let pois = await searchPois(radiusMeters, true);
+    console.log(`[tourGeneration] Found ${pois.length} primary POIs within ${radiusMeters}m`);
 
     // Step 2: If < 40 primary POIs, include all POIs (primary + secondary)
-    if (primaryPois.length < 40) {
+    if (pois.length < 40) {
       console.log(`[tourGeneration] Less than 40 primary POIs, including secondary POIs`);
-      primaryPois = pois; // Use all POIs
+      pois = await searchPois(radiusMeters, false);
+      console.log(`[tourGeneration] Found ${pois.length} total POIs within ${radiusMeters}m`);
 
       // Step 3: If still < 40, expand radius by 1.5x
-      if (primaryPois.length < 40) {
+      if (pois.length < 40) {
         const expandedRadius = Math.round(radiusMeters * 1.5);
         console.log(`[tourGeneration] Still less than 40 POIs, expanding radius to ${expandedRadius}m`);
-
-        poiIds = await redisClient.geoRadius(
-          geoKey,
-          { longitude, latitude },
-          expandedRadius,
-          'm',
-          { SORT: 'ASC', COUNT: 100 }
-        );
-
-        console.log(`[tourGeneration] Found ${poiIds.length} POIs within ${expandedRadius}m`);
-
-        // Fetch expanded POI documents
-        pois = [];
-        const expiredPoiIdsExpanded = [];
-        for (const poiId of poiIds) {
-          try {
-            const poiKey = `poi:${poiId}`;
-            const poiDoc = await redisClient.json.get(poiKey, { path: '$' });
-            if (poiDoc && poiDoc[0]) {
-              pois.push({
-                id: poiDoc[0].place_id,
-                name: poiDoc[0].name,
-                latitude: poiDoc[0].location.lat,
-                longitude: poiDoc[0].location.lon,
-                types: poiDoc[0].types || [],
-                rating: poiDoc[0].rating,
-                primary: poiDoc[0].primary
-              });
-            } else {
-              expiredPoiIdsExpanded.push(poiId);
-            }
-          } catch (err) {
-            console.warn(`[tourGeneration] Failed to fetch POI ${poiId}:`, err.message);
-            expiredPoiIdsExpanded.push(poiId);
-          }
-        }
-
-        // Clean up expired POI entries from geo index
-        if (expiredPoiIdsExpanded.length > 0) {
-          console.log(`[tourGeneration] Cleaning up ${expiredPoiIdsExpanded.length} expired POI entries from expanded search`);
-          try {
-            await redisClient.zRem(geoKey, expiredPoiIdsExpanded);
-          } catch (err) {
-            console.warn('[tourGeneration] Failed to clean up expired geo entries:', err.message);
-          }
-        }
-
-        primaryPois = pois;
+        pois = await searchPois(expandedRadius, false);
+        console.log(`[tourGeneration] Found ${pois.length} POIs within ${expandedRadius}m`);
       }
     }
 
-    // Return top 40 POIs sorted by distance (already sorted by Redis geoRadius)
-    const result = primaryPois.slice(0, 40);
+    // Return top 40 POIs (already sorted by distance from RediSearch)
+    const result = pois.slice(0, 40);
     console.log(`[tourGeneration] Returning ${result.length} POIs for tour generation`);
     return result;
 
