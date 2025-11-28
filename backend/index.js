@@ -74,11 +74,30 @@ async function start() {
     }
   });
 
+  // Normalize duration to discrete values for better caching
+  function normalizeDuration(durationMinutes) {
+    const allowedDurations = [30, 60, 90, 120, 180]; // 30min, 1h, 1.5h, 2h, 3h
+
+    // Find the closest allowed duration
+    let closest = allowedDurations[0];
+    let minDiff = Math.abs(durationMinutes - closest);
+
+    for (const duration of allowedDurations) {
+      const diff = Math.abs(durationMinutes - duration);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = duration;
+      }
+    }
+
+    return closest;
+  }
+
   app.post('/api/session', async (req, res) => {
     const {
       latitude,
       longitude,
-      durationMinutes,
+      durationMinutes: rawDuration,
       sessionId: clientSessionId,
       customization,
       language,
@@ -87,12 +106,15 @@ async function start() {
     if (
       typeof latitude !== 'number' ||
       typeof longitude !== 'number' ||
-      typeof durationMinutes !== 'number'
+      typeof rawDuration !== 'number'
     ) {
       return res.status(400).json({
         error: 'Invalid payload. Expected numeric latitude, longitude, durationMinutes.',
       });
     }
+
+    // Normalize duration to discrete values (30, 60, 90, 120, 180)
+    const durationMinutes = normalizeDuration(rawDuration);
 
     const sessionId =
       typeof clientSessionId === 'string' && clientSessionId.trim().length > 0
@@ -105,7 +127,7 @@ async function start() {
       sessionId,
       latitude,
       longitude,
-      durationMinutes,
+      durationMinutes: `${durationMinutes} (normalized from ${rawDuration})`,
       customization,
       language,
     });
@@ -262,32 +284,68 @@ async function start() {
       // Get language preference from session
       const language = sessionData.language || 'english';
 
-      // Generate a unique shareable tour ID (independent of session)
-      const shareableTourId = uuidv4();
-      console.log('[api] Generated shareable tour ID:', shareableTourId);
+      // Use the tour's existing UUID (assigned during generation)
+      // This ensures consistency: toursuggest:{UUID} → tour:{UUID}
+      const shareableTourId = selectedTour.id;
+      console.log('[api] Using tour ID from generation:', shareableTourId);
+
+      // Ensure finalized tours index exists
+      try {
+        await redisClient.ft.info('idx:tours');
+      } catch (err) {
+        const errorMsg = err.message || '';
+        if (errorMsg.includes('Unknown index name') || errorMsg.includes('no such index')) {
+          console.log('[api] Creating finalized tours index...');
+          await redisClient.ft.create(
+            'idx:tours',
+            {
+              '$.tourId': { type: 'TAG', AS: 'tourId' },
+              '$.originalTourId': { type: 'TAG', AS: 'originalTourId' },
+              '$.duration': { type: 'NUMERIC', AS: 'duration' },
+              '$.language': { type: 'TAG', AS: 'language' },
+              '$.startLocation': { type: 'GEO', AS: 'startLocation' },
+              '$.title': { type: 'TEXT', AS: 'title' },
+              '$.status': { type: 'TAG', AS: 'status' },
+              '$.createdAt': { type: 'TEXT', AS: 'createdAt' }
+            },
+            {
+              ON: 'JSON',
+              PREFIX: 'tour:'
+            }
+          );
+          console.log('[api] Finalized tours index created');
+        }
+      }
 
       // Store tour data under the shareable tour ID as JSON
       const tourDataKey = `tour:${shareableTourId}`;
+      const startLongitude = parseFloat(sessionData.longitude);
+      const startLatitude = parseFloat(sessionData.latitude);
+
       const tourDocument = {
-        tourId: shareableTourId,
+        tourId: shareableTourId, // UUID (e.g., "1e4e6a0b-dce7-4e77-a43a-4eae369184df")
         sessionId, // Keep reference for debugging
-        originalTourId: tourId,
+        originalTourId: selectedTour.originalTourId || tourId, // LLM-generated slug (e.g., "RAA-001", "tel-aviv-green-escapes")
         status: 'generating',
         startedAt: new Date().toISOString(),
         title: selectedTour.title,
         abstract: selectedTour.abstract,
         theme: selectedTour.theme,
         estimatedTotalMinutes: selectedTour.estimatedTotalMinutes,
+        duration: selectedTour.estimatedTotalMinutes, // For RediSearch NUMERIC query
         language,
-        // Store starting point coordinates
-        startLatitude: parseFloat(sessionData.latitude),
-        startLongitude: parseFloat(sessionData.longitude),
+        // Store starting point coordinates (separate for backward compatibility)
+        startLatitude,
+        startLongitude,
+        // Store starting point as GEO field for RediSearch
+        startLocation: `${startLongitude},${startLatitude}`,
         // Store full tour data with stops and walking directions
         tour: selectedTour,
         areaContext,
         // Placeholders for scripts and audio files (will be added when generation completes)
         scripts: null,
         audioFiles: null,
+        createdAt: new Date().toISOString()
       };
 
       await redisClient.json.set(tourDataKey, '$', tourDocument);

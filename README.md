@@ -29,11 +29,14 @@ A smart walking tour generator that creates personalized audio-guided tours usin
 - **Feedback system** - Rate tours and provide feedback
 - **Mobile-responsive** - Optimized for on-the-go use
 
-### 🔍 Observability
+### 🔍 Observability & Performance
 - **LangSmith tracing** - Complete visibility into AI workflows
 - **External API tracing** - Google Maps, Places, Directions, and TTS calls tracked
 - **Error handling** - Automatic fallback from `gemini-3-pro-preview` to `gemini-2.5-pro` on rate limits
 - **Performance monitoring** - Track API latency and bottlenecks
+- **Two-tier caching** - Tour suggestions and POI data cached for 7 days
+- **Cache hit optimization** - Discrete duration values (30, 60, 90, 120, 180 min) improve cache hits
+- **RediSearch indices** - Fast geospatial queries with `idx:pois` and `idx:tour_suggestions`
 
 ## Tech Stack
 
@@ -48,7 +51,7 @@ A smart walking tour generator that creates personalized audio-guided tours usin
   - Google Directions API
   - Google Cloud Text-to-Speech API
 - **Storage**:
-  - Redis (sessions, checkpointing, tour data)
+  - Redis Stack with RediSearch (sessions, checkpointing, caching, geospatial queries)
   - Google Cloud Storage (audio files)
 - **Deployment**:
   - Vercel (frontend)
@@ -59,7 +62,7 @@ A smart walking tour generator that creates personalized audio-guided tours usin
 
 ### Prerequisites
 - Node.js 18+
-- Redis 7+
+- Redis Stack 7+ (or Redis with RediSearch module)
 - Google Cloud Project with:
   - Maps JavaScript API enabled
   - Geocoding API enabled
@@ -157,10 +160,58 @@ Press F5 and select "Launch Full Stack" to run both backend and frontend with de
 
 ## Architecture
 
+### Modular LangGraph Design (v1.0.11)
+
+The backend uses a **modular node-based architecture** for maintainability and scalability:
+
+```
+backend/
+├── tourGeneration.js          # Main graph definition (302 lines)
+├── nodes/                     # LangGraph nodes (10 files)
+│   ├── cache/                 # Caching layer
+│   │   ├── checkCacheForTourSuggestions.js
+│   │   ├── checkPoiCache.js
+│   │   └── saveTourSuggestionsToCache.js
+│   ├── poi/                   # POI discovery
+│   │   ├── fetchPoisFromGoogleMaps.js
+│   │   └── queryPois.js
+│   ├── context/               # Area context building
+│   │   ├── reverseGeocode.js
+│   │   ├── generateAreaSummaries.js
+│   │   └── assembleAreaContext.js
+│   └── tours/                 # Tour generation & validation
+│       ├── generateCandidateTours.js
+│       └── validateWalkingTimes.js
+└── utils/                     # Shared utilities (4 files)
+    ├── tourState.js           # State definition
+    ├── poiHelpers.js          # POI search & caching
+    ├── geocodingHelpers.js    # Geocoding & summaries
+    └── tourHelpers.js         # Tour generation & validation
+```
+
 ### Tour Generation Flow (LangGraph)
-1. **collect_context** - Reverse geocode, search POIs, generate city/neighborhood summaries
-2. **generate_candidate_tours** - Gemini generates ~10 tour options
-3. **validate_walking_times** - Google Directions API validates routes and timing
+
+**Workflow:**
+```
+START → check_cache → [cache hit? → END]
+                   ↓ [cache miss]
+      check_poi_cache → [40+ POIs? → query_pois]
+                     ↓ [< 40 POIs]
+      fetch_pois_from_google_maps → query_pois
+                                  ↓
+      reverse_geocode → generate_area_summaries
+                     ↓
+      assemble_area_context → generate_candidate_tours
+                           ↓
+      validate_walking_times → save_to_cache → END
+```
+
+**Key Features:**
+- **Two-tier caching** - Tour suggestions (7-day TTL) + POI data (7-day TTL)
+- **Discrete durations** - Normalized to 30, 60, 90, 120, 180 minutes for better cache hits
+- **Parallel execution** - Reverse geocoding and area summaries run concurrently
+- **Smart routing** - Skips cache for customized requests
+- **RediSearch indices** - Fast geospatial queries for POIs and tours
 
 ### Audioguide Generation Flow (LangGraph)
 1. **fan_out_scripts** - Generate intro + stop scripts in parallel with Gemini
@@ -173,7 +224,6 @@ All external API calls are wrapped with `@traceable`:
 - `reverseGeocode` - Geocoding API
 - `searchNearbyPois` - Places API orchestration
 - `searchPlacesNearby` - Individual Places API calls
-- `buildAreaContext` - Full context building pipeline
 - `getWalkingDirections` - Directions API
 - `synthesizeAudio` - TTS API + GCS upload
 
@@ -191,4 +241,4 @@ All external API calls are wrapped with `@traceable`:
 - Google Cloud service account credentials added as secret
 
 ---
-**Version 1.0.10**
+**Version 1.0.11** - Modular architecture with enhanced caching

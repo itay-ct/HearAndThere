@@ -1,8 +1,8 @@
 
-# Hear & There — Product Specification (v1.0.10)
+# Hear & There — Product Specification (v1.0.11)
 
 > AI-powered walking tour generator with audio guides, shareable tours, and real-time navigation.
-> **Current Status:** Full-featured MVP with tour generation, audioguide creation, shareable tour player, and comprehensive LangSmith observability.
+> **Current Status:** Production-ready with modular architecture, two-tier caching, and comprehensive observability.
 
 ---
 
@@ -12,11 +12,11 @@
 **Framework:** React with Vite + TypeScript
 **UI Library:** Tailwind CSS (mobile-first, responsive design)
 **Backend:** Node.js (Express) with LangGraph + Gemini
-**Data Store:** Redis (sessions, checkpointing, tour data)
+**Data Store:** Redis Stack with RediSearch (sessions, checkpointing, caching, geospatial queries)
 **Cloud Services:** Google Cloud (TTS, Storage)
 **Hosting:** Frontend on Vercel, backend on Railway
 **Monitoring:** LangSmith for AI observability
-**Version:** 1.0.10 — Production-ready with audio guides, shareable tours, and full tracing
+**Version:** 1.0.11 — Modular architecture with enhanced caching and performance optimization
 
 ---
 
@@ -185,40 +185,103 @@
 
 ## 🧮 LangGraph Workflows
 
-### Tour Generation Graph
+### Tour Generation Graph (Modular Architecture v1.0.11)
+
+**Modular Structure:**
+```
+backend/
+├── tourGeneration.js          # Main graph definition (302 lines)
+├── nodes/                     # 10 modular node files
+│   ├── cache/                 # Caching layer (3 nodes)
+│   ├── poi/                   # POI discovery (2 nodes)
+│   ├── context/               # Context building (3 nodes)
+│   └── tours/                 # Tour generation (2 nodes)
+└── utils/                     # Shared utilities (4 files)
+```
+
+**Workflow:**
+```
+START
+  ↓
+check_cache_for_tour_suggestions
+  ├─ [Cache HIT] → END (return cached tours)
+  └─ [Cache MISS] ↓
+check_poi_cache
+  ├─ [40+ POIs in cache] → query_pois
+  └─ [< 40 POIs] → fetch_pois_from_google_maps → query_pois
+                                                ↓
+reverse_geocode (parallel) ──┐
+generate_area_summaries ──────┤
+                              ↓
+assemble_area_context
+  ↓
+generate_candidate_tours
+  ↓
+validate_walking_times
+  ↓
+save_tour_suggestions_to_cache
+  ↓
+END
+```
 
 **Nodes:**
-1. **collect_context**
-   - Inputs: `sessionId`, `latitude`, `longitude`, `durationMinutes`
-   - Calls (all traced with LangSmith):
-     - `reverseGeocode()` - Google Maps Geocoding API → city + neighborhood
-     - `searchNearbyPois()` - Google Places API → up to 20 POIs
-       - Dynamic radius based on tour duration (500m - 3000m)
-       - Primary types: historical sites, museums, parks, cafes, etc.
-       - Secondary types: art studios, beaches, viewpoints, etc.
-     - `generateCitySummary()` - Gemini 2.5 Flash → city context
-     - `generateNeighborhoodSummary()` - Gemini 2.5 Flash → neighborhood context
-   - Output: `areaContext` with city, neighborhood, POIs, summaries
 
-2. **generate_candidate_tours**
-   - Input: `areaContext` from previous node
-   - Calls:
-     - `generateToursWithGemini()` - Gemini 2.5 Flash
-       - Generates ~10 candidate tours
-       - Includes themes, abstracts, stops, timing estimates
-       - Considers user customization and language
-   - Fallback: `heuristicToursFromPois()` if Gemini unavailable
-   - Output: `candidateTours` array
+1. **check_cache_for_tour_suggestions** (`nodes/cache/`)
+   - Checks RediSearch index `idx:tour_suggestions`
+   - Query: exact duration + language + location within 50m
+   - Returns up to 10 cached tours if found
+   - Skips cache if customization provided
 
-3. **validate_walking_times**
-   - Input: `candidateTours` from previous node
-   - Calls:
-     - `filterAndRankTours()` - Score and rank by duration fit
-     - `validateWalkingTimes()` - For each tour:
-       - `getWalkingDirections()` - Google Directions API (traced)
-       - Validates LLM time estimates against real walking times
-       - Adds step-by-step directions to each stop
-   - Output: `finalTours` (top 3) with validated routes
+2. **check_poi_cache** (`nodes/cache/`)
+   - Checks RediSearch index `idx:pois`
+   - Counts POIs within dynamic radius (500m-3000m based on duration)
+   - Routes to Google Maps fetch if < 40 primary POIs
+
+3. **fetch_pois_from_google_maps** (`nodes/poi/`)
+   - Calls Google Places API for primary and secondary POIs
+   - Caches each POI in Redis with 7-day TTL
+   - Creates RediSearch index if not exists
+
+4. **query_pois** (`nodes/poi/`)
+   - Queries POIs from RediSearch index
+   - Geospatial query with dynamic radius
+   - Returns up to 20 POIs for tour generation
+
+5. **reverse_geocode** (`nodes/context/`)
+   - Google Maps Geocoding API → city + neighborhood
+   - Traced with LangSmith
+
+6. **generate_area_summaries** (`nodes/context/`)
+   - Runs in parallel with reverse_geocode
+   - Gemini 2.5 Flash generates city and neighborhood summaries
+   - Provides cultural and historical context
+
+7. **assemble_area_context** (`nodes/context/`)
+   - Combines city, neighborhood, POIs, and summaries
+   - Prepares complete context for tour generation
+
+8. **generate_candidate_tours** (`nodes/tours/`)
+   - Gemini 2.5 Flash generates ~10 tour options
+   - Considers user customization and language
+   - Fallback: heuristic tours if Gemini unavailable
+
+9. **validate_walking_times** (`nodes/tours/`)
+   - Google Directions API validates routes
+   - Compares LLM estimates vs. real walking times
+   - Adds step-by-step directions
+   - Returns top 3 tours
+
+10. **save_tour_suggestions_to_cache** (`nodes/cache/`)
+    - Saves each tour individually with unique ID
+    - 7-day TTL
+    - Indexed by duration, language, and geolocation
+    - Skips if customization provided or cache was hit
+
+**Caching Strategy:**
+- **Tour Suggestions Cache:** `toursuggest_cache:{UUID}` (7-day TTL)
+- **POI Cache:** `poi_cache:{PLACE_ID}` (7-day TTL)
+- **Discrete Durations:** Normalized to 30, 60, 90, 120, 180 minutes for better cache hits
+- **RediSearch Indices:** Fast geospatial queries with GEO fields
 
 **Checkpointing:** Uses `RedisSaver` for LangGraph state persistence
 
@@ -381,10 +444,52 @@ All external API calls are wrapped with `@traceable` for complete visibility:
 
 ### Versioning
 
-- **Format:** Semantic versioning (e.g., 1.0.10)
-- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.10" }`
+- **Format:** Semantic versioning (e.g., 1.0.11)
+- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.11" }`
 - **Frontend Display:** Version shown in tour player footer
 - **Updates:** Increment with each deployment
+
+### Cache Troubleshooting
+
+**Common Issues:**
+
+1. **Index is empty despite having documents**
+   - **Symptom:** Redis has `toursuggest_cache:*` keys but index shows 0 documents
+   - **Cause:** Index created before documents, or incorrect document structure
+   - **Fix:** Drop and recreate index: `redis-cli FT.DROPINDEX idx:tour_suggestions` then restart backend
+
+2. **Cache always returns MISS**
+   - **Symptom:** Tours never retrieved from cache
+   - **Cause:** Duration not normalized, or location tolerance too strict
+   - **Fix:** Verify durations are normalized to 30, 60, 90, 120, 180 minutes
+
+3. **Search returns 0 results**
+   - **Symptom:** Documents exist but search fails
+   - **Cause:** Query syntax error or GEO format incorrect
+   - **Fix:** Verify `startLocation` is in format `"longitude,latitude"`
+
+**Required Document Structure:**
+```json
+{
+  "tourId": "uuid-here",
+  "duration": 60,
+  "language": "english",
+  "startLocation": "longitude,latitude",
+  "tour": { "id": "uuid", "title": "...", "stops": [...] },
+  "createdAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+**RediSearch Index Schema:**
+- `idx:tour_suggestions` - Tour suggestions cache
+  - `tourId` (TAG), `duration` (NUMERIC), `language` (TAG)
+  - `startLocation` (GEO), `title` (TEXT), `createdAt` (TEXT)
+  - Prefix: `toursuggest_cache:`
+
+- `idx:pois` - POI cache
+  - `name` (TEXT), `types` (TAG array), `location` (GEO)
+  - `rating` (NUMERIC), `primary` (TAG)
+  - Prefix: `poi_cache:`
 
 ---
 

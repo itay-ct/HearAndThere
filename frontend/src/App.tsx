@@ -645,24 +645,32 @@ function App() {
               <section>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-semibold text-slate-800">Tour duration</h2>
-                  <p className="text-xs text-slate-500">Between 15 minutes and 4 hours</p>
+                  <p className="text-xs text-slate-500">Select your preferred duration</p>
                 </div>
 
                 <div className="space-y-3">
-                  <input
-                    type="range"
-                    min={15}
-                    max={240}
-                    step={5}
+                  <select
                     value={durationMinutes}
                     onChange={(event) => setDurationMinutes(Number(event.target.value))}
-                    className="w-full cursor-pointer accent-[#f36f5e]"
-                  />
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 shadow-sm focus:border-[#f36f5e] focus:outline-none focus:ring-2 focus:ring-[#f36f5e]/20"
+                  >
+                    <option value={30}>30 minutes</option>
+                    <option value={60}>1 hour</option>
+                    <option value={90}>1.5 hours</option>
+                    <option value={120}>2 hours</option>
+                    <option value={180}>3 hours</option>
+                  </select>
                   <p className="text-xs text-slate-600">
                     <span className="mr-1" aria-hidden="true">
                       ⏱️
                     </span>
-                    <span className="font-semibold text-sky-800">{durationMinutes} minutes</span>
+                    <span className="font-semibold text-sky-800">
+                      {durationMinutes === 30 && '30 minutes'}
+                      {durationMinutes === 60 && '1 hour'}
+                      {durationMinutes === 90 && '1.5 hours'}
+                      {durationMinutes === 120 && '2 hours'}
+                      {durationMinutes === 180 && '3 hours'}
+                    </span>
                   </p>
                 </div>
               </section>
@@ -696,18 +704,14 @@ function App() {
               </section>
 
 
-              <div className="pt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="pt-2">
                 <button
                   type="submit"
                   disabled={!canSubmit || status === 'saving'}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {status === 'saving' ? 'Saving session…' : 'Propose Tours'}
                 </button>
-
-                <div className="text-xs text-slate-500">
-                  <p>We’ll save this session in Redis to begin your journey.</p>
-                </div>
               </div>
             </form>
           </div>
