@@ -5,7 +5,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000'
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-const FRONTEND_VERSION = '1.0.10' // Update this with each commit
+const FRONTEND_VERSION = __APP_VERSION__ // Injected from package.json by Vite
 
 interface Stop {
   name: string
