@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { LocateFixed, MapPinned, MapPinOff, Minus, Plus } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
@@ -24,6 +25,7 @@ type Tour = {
 }
 
 type Status = 'idle' | 'saving' | 'success' | 'error'
+type LocationStatus = 'idle' | 'detecting' | 'detected' | 'error'
 
 function App() {
   const [latitude, setLatitude] = useState<number | ''>('')
@@ -46,10 +48,13 @@ function App() {
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
   const [toursGenerated, setToursGenerated] = useState<boolean>(false)
   const [shareableTourId, setShareableTourId] = useState<string | null>(null)
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
+  const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const longPressTimerRef = useRef<number | null>(null)
 
   const stopProgressPolling = useCallback(() => {
     if (progressIntervalRef.current !== null) {
@@ -118,50 +123,89 @@ function App() {
 
   const handleUseMyLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      setStatus('error')
-      setMessage('Geolocation is not supported in this browser.')
+      setLocationStatus('error')
       return
     }
 
-    setStatus('idle')
-    setMessage('Detecting your location...')
+    setLocationStatus('detecting')
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLatitude(Number(pos.coords.latitude.toFixed(6)))
         setLongitude(Number(pos.coords.longitude.toFixed(6)))
-        setMessage('Location detected. You can fine-tune it if needed.')
+        setLocationStatus('detected')
       },
-      async (err) => {
+      (err) => {
         console.error('Geolocation error', err)
-
-        // Try IP-based location as fallback
-        try {
-          setMessage('GPS unavailable, trying IP-based location...')
-          const response = await fetch('https://ipapi.co/json/')
-          const data = await response.json()
-
-          if (data.latitude && data.longitude) {
-            setLatitude(Number(data.latitude.toFixed(6)))
-            setLongitude(Number(data.longitude.toFixed(6)))
-            setMessage('Approximate location detected via IP. You can fine-tune it if needed.')
-            return
-          }
-        } catch (ipError) {
-          console.error('IP location failed:', ipError)
-        }
-
-        // Final fallback
-        setStatus('error')
-        setMessage('Location unavailable. Please enter coordinates manually.')
+        setLocationStatus('error')
       },
       {
-        enableHighAccuracy: false,
+        enableHighAccuracy: true,
         timeout: 15000,
         maximumAge: 300000
       }
     )
   }, [])
+
+  const handleLocationButtonPress = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    // Check for Ctrl/Cmd + Click
+    if ('ctrlKey' in e && (e.ctrlKey || e.metaKey)) {
+      setShowLocationInputs(true)
+      return
+    }
+
+    // Start long press timer for touch/mouse
+    longPressTimerRef.current = window.setTimeout(() => {
+      setShowLocationInputs(true)
+    }, 500) // 500ms for long press
+  }, [])
+
+  const handleLocationButtonRelease = useCallback(() => {
+    // Clear long press timer
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+  }, [])
+
+  const handleLocationButtonClick = useCallback((e: React.MouseEvent) => {
+    // If Ctrl/Cmd was pressed, don't trigger location detection
+    if (e.ctrlKey || e.metaKey) {
+      return
+    }
+
+    // Only detect location if not already showing inputs
+    if (!showLocationInputs) {
+      handleUseMyLocation()
+    }
+  }, [showLocationInputs, handleUseMyLocation])
+
+  const DURATION_OPTIONS = [30, 60, 90, 120, 180]
+
+  const handleDecreaseDuration = useCallback(() => {
+    const currentIndex = DURATION_OPTIONS.indexOf(durationMinutes)
+    if (currentIndex > 0) {
+      setDurationMinutes(DURATION_OPTIONS[currentIndex - 1])
+    }
+  }, [durationMinutes])
+
+  const handleIncreaseDuration = useCallback(() => {
+    const currentIndex = DURATION_OPTIONS.indexOf(durationMinutes)
+    if (currentIndex < DURATION_OPTIONS.length - 1) {
+      setDurationMinutes(DURATION_OPTIONS[currentIndex + 1])
+    }
+  }, [durationMinutes])
+
+  const getDurationLabel = (minutes: number) => {
+    switch (minutes) {
+      case 30: return '30 minutes'
+      case 60: return '1 hour'
+      case 90: return '1.5 hours'
+      case 120: return '2 hours'
+      case 180: return '3 hours'
+      default: return `${minutes} minutes`
+    }
+  }
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -584,105 +628,142 @@ function App() {
   return (
     <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
+         <header className="mb-8 text-center">
+          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Hear &amp; There</h1>
+          <p>Generate your own personalized audio-guided walking tour.</p>
+        </header>
         {/* STEP 1: Input Form */}
         <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
-          <header className="mb-8 text-center">
-            <h1 className="text-3xl font-semibold text-slate-900 mb-2">Hear &amp; There</h1>
-          </header>
+         
 
           <form onSubmit={handleSubmit} className="space-y-6">
               <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">Your location</h2>
+                <h2 className="text-sm font-semibold text-slate-800 mb-3">Your location</h2>
+
+                {!showLocationInputs ? (
                   <button
                     type="button"
-                    onClick={handleUseMyLocation}
-                    className="text-xs font-medium text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
+                    onClick={handleLocationButtonClick}
+                    onMouseDown={handleLocationButtonPress}
+                    onMouseUp={handleLocationButtonRelease}
+                    onMouseLeave={handleLocationButtonRelease}
+                    onTouchStart={handleLocationButtonPress}
+                    onTouchEnd={handleLocationButtonRelease}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
+                      locationStatus === 'detected'
+                        ? 'border-green-200 bg-green-50 text-green-700'
+                        : locationStatus === 'error'
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50'
+                    }`}
                   >
-                    Use my location
+                    {locationStatus === 'detecting' ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-medium">Detecting location...</span>
+                      </>
+                    ) : locationStatus === 'detected' ? (
+                      <>
+                        <MapPinned className="w-5 h-5" />
+                        <span className="text-sm font-medium">Location Detected</span>
+                      </>
+                    ) : locationStatus === 'error' ? (
+                      <>
+                        <MapPinOff className="w-5 h-5" />
+                        <span className="text-sm font-medium">Location cannot be detected</span>
+                      </>
+                    ) : (
+                      <>
+                        <LocateFixed className="w-5 h-5" />
+                        <span className="text-sm font-medium">Detect my location</span>
+                      </>
+                    )}
                   </button>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col text-xs font-medium text-slate-700">
+                        Latitude
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={latitude}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setLatitude(value === '' ? '' : Number(value))
+                          }}
+                          placeholder="32.0809"
+                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                          required
+                        />
+                      </label>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <label className="flex flex-col text-xs font-medium text-slate-700">
-                    Latitude
-                    <input
-                      type="number"
-                      step="0.000001"
-                      value={latitude}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setLatitude(value === '' ? '' : Number(value))
-                      }}
-                      placeholder="32.0809"
-                      className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                      required
-                    />
-                  </label>
-
-                  <label className="flex flex-col text-xs font-medium text-slate-700">
-                    Longitude
-                    <input
-                      type="number"
-                      step="0.000001"
-                      value={longitude}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setLongitude(value === '' ? '' : Number(value))
-                      }}
-                      placeholder="34.7806"
-                      className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                      required
-                    />
-                  </label>
-                </div>
+                      <label className="flex flex-col text-xs font-medium text-slate-700">
+                        Longitude
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={longitude}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setLongitude(value === '' ? '' : Number(value))
+                          }}
+                          placeholder="34.7806"
+                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                          required
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowLocationInputs(false)}
+                      className="text-xs text-slate-600 hover:text-slate-900 underline"
+                    >
+                      Hide manual input
+                    </button>
+                  </div>
+                )}
               </section>
 
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">Tour duration</h2>
-                  <p className="text-xs text-slate-500">Select your preferred duration</p>
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {/* Tour Duration */}
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-3">Tour duration</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleDecreaseDuration}
+                      disabled={DURATION_OPTIONS.indexOf(durationMinutes) === 0}
+                      className="w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <div className="flex-1 text-center">
+                      <p className="text-sm font-semibold text-slate-900">{getDurationLabel(durationMinutes)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleIncreaseDuration}
+                      disabled={DURATION_OPTIONS.indexOf(durationMinutes) === DURATION_OPTIONS.length - 1}
+                      className="w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="space-y-3">
+                {/* Language */}
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-3">Language</h2>
                   <select
-                    value={durationMinutes}
-                    onChange={(event) => setDurationMinutes(Number(event.target.value))}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 shadow-sm focus:border-[#f36f5e] focus:outline-none focus:ring-2 focus:ring-[#f36f5e]/20"
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
                   >
-                    <option value={30}>30 minutes</option>
-                    <option value={60}>1 hour</option>
-                    <option value={90}>1.5 hours</option>
-                    <option value={120}>2 hours</option>
-                    <option value={180}>3 hours</option>
+                    <option value="english">English</option>
+                    <option value="hebrew">עברית (Hebrew)</option>
                   </select>
-                  <p className="text-xs text-slate-600">
-                    <span className="mr-1" aria-hidden="true">
-                      ⏱️
-                    </span>
-                    <span className="font-semibold text-sky-800">
-                      {durationMinutes === 30 && '30 minutes'}
-                      {durationMinutes === 60 && '1 hour'}
-                      {durationMinutes === 90 && '1.5 hours'}
-                      {durationMinutes === 120 && '2 hours'}
-                      {durationMinutes === 180 && '3 hours'}
-                    </span>
-                  </p>
                 </div>
-              </section>
-
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">Language</h2>
-                </div>
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                >
-                  <option value="english">English</option>
-                  <option value="hebrew">עברית (Hebrew)</option>
-                </select>
               </section>
 
               <section>
@@ -733,22 +814,7 @@ function App() {
         {/* STEP 2: Tour Selection */}
         {toursGenerated && tours.length > 0 && (
           <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
-            <header className="mb-6 text-center">
-              <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
-                Hear &amp; There
-              </p>
-              <h1 className="text-3xl font-semibold text-slate-900 mb-2">
-                Choose Your Tour
-              </h1>
-              <p className="text-sm text-slate-600">
-                {neighborhood || city
-                  ? `Starting near ${neighborhood || city}.`
-                  : 'Here are a few routes based on your starting point.'}
-              </p>
-            </header>
-
-            <div className="space-y-4">
-              <button
+            <button
                 type="button"
                 onClick={() => {
                   setToursGenerated(false);
@@ -761,6 +827,20 @@ function App() {
                 <span>←</span>
                 <span>Go Back</span>
               </button>
+            <header className="mb-6 text-center">
+              
+              <h1 className="text-3xl font-semibold text-slate-900 mb-2">
+                Choose Your Tour
+              </h1>
+              <p className="text-sm text-slate-600">
+                {neighborhood || city
+                  ? `Starting near ${neighborhood || city}.`
+                  : 'Here are a few routes we prepared for you.'}
+              </p>
+            </header>
+
+            <div className="space-y-4">
+              
                 <div className="-mx-4 overflow-x-auto pb-2">
                   <div className="flex gap-4 px-1">
                     {tours.map((tour) => (
@@ -772,16 +852,17 @@ function App() {
                             : 'border-slate-200'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-3 mb-2">
-                          <div>
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="flex-1">
                             <h2 className="text-sm font-semibold text-slate-900">{tour.title}</h2>
-                            <p className="mt-1 text-xs text-slate-600">{tour.abstract}</p>
                           </div>
-                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-                            {tour.theme}
-                          </span>
+
+                         <span className="inline-flex items-center justify-center text-center w-24 rounded-2xl border border-sky-200 bg-sky-50 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-tight text-sky-700">
+                           {tour.theme}
+                         </span>
                         </div>
 
+                        <p className="mt-1 text-xs text-slate-600">{tour.abstract}</p>
                         <p className="mb-3 text-[11px] text-slate-500">
                           ⏱️ ~{tour.estimatedTotalMinutes} min · {tour.stops.length} stops
                         </p>
@@ -881,69 +962,6 @@ function App() {
           </div>
         )}
 
-        {/* STEP 5: Audioguide Status/Player */}
-        {selectedTour && audioguideGenerating && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <button
-              type="button"
-              onClick={() => {
-                setAudioguideGenerating(false);
-                setAudioguideData(null);
-                setAudioguideError(null);
-              }}
-              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
-            >
-              <span>←</span>
-              <span>Go Back</span>
-            </button>
-
-            <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
-              <h3 className="text-sm font-semibold text-sky-900 mb-4">
-                🎧 Generating Audioguide
-              </h3>
-              <p className="text-xs text-sky-700 mb-4">
-                Creating engaging narration for your tour. This may take a few minutes...
-              </p>
-              <div className="flex items-center gap-3 text-xs">
-                <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-sky-700">Generating scripts and audio...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {selectedTour && audioguideError && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <button
-              type="button"
-              onClick={() => {
-                setAudioguideGenerating(false);
-                setAudioguideData(null);
-                setAudioguideError(null);
-              }}
-              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
-            >
-              <span>←</span>
-              <span>Go Back</span>
-            </button>
-
-            <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6">
-              <h3 className="text-sm font-semibold text-red-900 mb-4">
-                ❌ Audioguide Generation Failed
-              </h3>
-              <p className="text-xs text-red-700 mb-4">
-                {audioguideError}
-              </p>
-              <button
-                type="button"
-                onClick={handleGenerateAudioguide}
-                className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        )}
 
         {selectedTour && shareableTourId && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
@@ -966,96 +984,7 @@ function App() {
             </div>
           </div>
         )}
-
-        {/* Legacy audioguide player - kept for backward compatibility */}
-        {selectedTour && audioguideData && audioguideData.audioFiles && !shareableTourId && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <button
-              type="button"
-              onClick={() => {
-                setAudioguideGenerating(false);
-                setAudioguideData(null);
-                setAudioguideError(null);
-              }}
-              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
-            >
-              <span>←</span>
-              <span>Go Back</span>
-            </button>
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6">
-              <h3 className="text-sm font-semibold text-emerald-900 mb-4">
-                🎧 Audioguide Ready
-              </h3>
-              <p className="text-xs text-emerald-700 mb-4">
-                Your personalized audioguide is ready. Click play to listen to each segment.
-              </p>
-
-              <div className="space-y-3">
-                {/* Introduction */}
-                {audioguideData.audioFiles.intro && audioguideData.audioFiles.intro.url && (
-                  <div className="bg-white rounded-xl p-4 border border-emerald-100">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex-1">
-                        <h4 className="text-xs font-semibold text-slate-900 mb-1">
-                          Introduction
-                        </h4>
-                        <p className="text-[11px] text-slate-600">
-                          Welcome and tour overview
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          playingAudioId === 'intro'
-                            ? handlePauseAudio()
-                            : handlePlayAudio(audioguideData.audioFiles.intro.url, 'intro')
-                        }
-                        className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500 text-white hover:bg-emerald-600 transition"
-                      >
-                        {playingAudioId === 'intro' ? '⏸' : '▶'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Stops */}
-                {audioguideData.audioFiles.stops && audioguideData.audioFiles.stops.map((stopAudio: any, index: number) => {
-                  if (!stopAudio || !stopAudio.url) return null
-                  const stop = selectedTour.stops[index]
-                  if (!stop) return null
-
-                  const audioId = `stop-${index}`
-
-                  return (
-                    <div key={audioId} className="bg-white rounded-xl p-4 border border-emerald-100">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex-1">
-                          <h4 className="text-xs font-semibold text-slate-900 mb-1">
-                            Stop {index + 1}: {stop.name}
-                          </h4>
-                          <p className="text-[11px] text-slate-600">
-                            Historical facts and stories
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            playingAudioId === audioId
-                              ? handlePauseAudio()
-                              : handlePlayAudio(stopAudio.url, audioId)
-                          }
-                          className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500 text-white hover:bg-emerald-600 transition"
-                        >
-                          {playingAudioId === audioId ? '⏸' : '▶'}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
+        
 
         {/* Status Message */}
         {(status !== 'idle' || message) && (
