@@ -693,7 +693,7 @@ function App() {
                             setLatitude(value === '' ? '' : Number(value))
                           }}
                           placeholder="32.0809"
-                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
                           required
                         />
                       </label>
@@ -709,7 +709,7 @@ function App() {
                             setLongitude(value === '' ? '' : Number(value))
                           }}
                           placeholder="34.7806"
-                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
                           required
                         />
                       </label>
@@ -758,7 +758,7 @@ function App() {
                   <select
                     value={language}
                     onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
                   >
                     <option value="english">English</option>
                     <option value="hebrew">עברית (Hebrew)</option>
@@ -776,7 +776,7 @@ function App() {
                   onChange={(e) => setCustomization(e.target.value)}
                   placeholder="E.g., 'Focus on street art and modern culture' or 'Include kid-friendly stops'"
                   rows={3}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
                 />
               </section>
 
@@ -785,7 +785,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={!canSubmit || status === 'saving'}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {status === 'saving' ? 'Saving session…' : 'Propose Tours'}
                 </button>
