@@ -372,7 +372,7 @@ export default function TourPlayer() {
       {/* Floating Tour Title */}
       <div className="sticky top-0 z-20 bg-white/35 backdrop-blur-sm border-b border-sky-100 shadow-sm">
         <div className="w-full max-w-4xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-normal text-slate-900 text-center tracking-wider">
+          <h1 className="text-xl font-normal text-slate-900 text-center tracking-wider">
             {tourData.title}
           </h1>
         </div>
