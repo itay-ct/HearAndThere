@@ -300,6 +300,10 @@ export default function TourPlayer() {
       // Pause current
       audio?.pause()
       setCurrentlyPlaying(null)
+      // Clear media session
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused'
+      }
     } else {
       // Pause all others
       Object.values(audioRefs.current).forEach(a => a?.pause())
@@ -308,12 +312,55 @@ export default function TourPlayer() {
       if (!audio) {
         const newAudio = new Audio(url)
         audioRefs.current[key] = newAudio
-        newAudio.onended = () => setCurrentlyPlaying(null)
+        newAudio.onended = () => {
+          setCurrentlyPlaying(null)
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'none'
+          }
+        }
+        
+        // Set up media session
+        setupMediaSession(newAudio, key)
         newAudio.play()
       } else {
+        setupMediaSession(audio, key)
         audio.play()
       }
       setCurrentlyPlaying(key)
+    }
+  }
+
+  const setupMediaSession = (audio: HTMLAudioElement, key: string) => {
+    if ('mediaSession' in navigator) {
+      // Get title based on key
+      const title = key === 'intro' ? 'Introduction' : 
+        key.startsWith('stop-') ? tourData?.tour?.stops[parseInt(key.split('-')[1])]?.name || 'Stop' : 'Audio'
+      
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title,
+        artist: tourData?.title || 'Hear & There',
+        album: 'Audio Tour',
+      })
+
+      navigator.mediaSession.setActionHandler('play', () => {
+        audio.play()
+        setCurrentlyPlaying(key)
+        navigator.mediaSession.playbackState = 'playing'
+      })
+
+      navigator.mediaSession.setActionHandler('pause', () => {
+        audio.pause()
+        setCurrentlyPlaying(null)
+        navigator.mediaSession.playbackState = 'paused'
+      })
+
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime) {
+          audio.currentTime = details.seekTime
+        }
+      })
+
+      navigator.mediaSession.playbackState = 'playing'
     }
   }
 
@@ -372,9 +419,9 @@ export default function TourPlayer() {
       {/* Floating Tour Title */}
       <div className="sticky top-0 z-20 bg-white/35 backdrop-blur-sm border-b border-sky-100 shadow-sm">
         <div className="w-full max-w-4xl mx-auto px-4 py-4">
-          <h1 className="text-xl font-normal text-slate-900 text-center tracking-wider">
+          <h2 className="text-3xl font-normal text-slate-900 text-center tracking-wider">
             {tourData.title}
-          </h1>
+          </h2>
         </div>
       </div>
 
@@ -494,7 +541,7 @@ export default function TourPlayer() {
                     className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
                   >
                     <span>{expandedDirections.has(-1) ? '▼' : '▶'}</span>
-                    <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to first stop'}</span>
+                    <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to the first stop'}</span>
                   </button>
                   {expandedDirections.has(-1) && (
                     <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50">
