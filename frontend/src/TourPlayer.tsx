@@ -135,8 +135,8 @@ export default function TourPlayer() {
       }
 
       // Determine map center (starting point if available, otherwise first stop)
-      const centerLat = tourData.startLatitude ?? tourData.tour.stops[0].latitude
-      const centerLng = tourData.startLongitude ?? tourData.tour.stops[0].longitude
+      const centerLat = tourData.startLatitude ?? tourData.tour?.stops[0].latitude ?? 0
+      const centerLng = tourData.startLongitude ?? tourData.tour?.stops[0].longitude ?? 0
 
       const map = new google.maps.Map(mapRef.current!, {
         zoom: 14,
@@ -163,7 +163,7 @@ export default function TourPlayer() {
       }
 
       // Add markers for each stop
-      tourData.tour.stops.forEach((stop, index) => {
+      tourData.tour?.stops.forEach((stop, index) => {
         new google.maps.Marker({
           position: { lat: stop.latitude, lng: stop.longitude },
           map,
@@ -173,7 +173,7 @@ export default function TourPlayer() {
       })
 
       // Use Directions API to draw actual walking route (not straight lines)
-      if (tourData.startLatitude && tourData.startLongitude && tourData.tour.stops.length > 0) {
+      if (tourData.startLatitude && tourData.startLongitude && tourData.tour?.stops && tourData.tour.stops.length > 0) {
         const directionsService = new google.maps.DirectionsService()
         const directionsRenderer = new google.maps.DirectionsRenderer({
           suppressMarkers: true, // We're using custom markers
@@ -187,17 +187,20 @@ export default function TourPlayer() {
         directionsRenderer.setMap(map)
 
         // Build waypoints (all stops except the last one)
-        const waypoints = tourData.tour.stops.slice(0, -1).map(stop => ({
+        const waypoints = tourData.tour?.stops.slice(0, -1).map(stop => ({
           location: { lat: stop.latitude, lng: stop.longitude },
           stopover: true,
         }))
+
+        // Get the last stop for the destination
+        const lastStop = tourData.tour?.stops[tourData.tour?.stops.length - 1]
 
         // Request directions from starting point through all stops
         const request = {
           origin: { lat: tourData.startLatitude, lng: tourData.startLongitude },
           destination: {
-            lat: tourData.tour.stops[tourData.tour.stops.length - 1].latitude,
-            lng: tourData.tour.stops[tourData.tour.stops.length - 1].longitude
+            lat: lastStop!.latitude,
+            lng: lastStop!.longitude
           },
           waypoints: waypoints,
           travelMode: google.maps.TravelMode.WALKING,
@@ -224,7 +227,7 @@ export default function TourPlayer() {
             })
           }
         })
-      } else if (tourData.tour.stops.length > 0) {
+      } else if (tourData.tour?.stops && tourData.tour.stops.length > 0) {
         // No starting point, just draw route between stops
         const directionsService = new google.maps.DirectionsService()
         const directionsRenderer = new google.maps.DirectionsRenderer({
@@ -243,11 +246,14 @@ export default function TourPlayer() {
           stopover: true,
         }))
 
+        const firstStop = tourData.tour.stops[0]
+        const lastStop = tourData.tour.stops[tourData.tour.stops.length - 1]
+
         const request = {
-          origin: { lat: tourData.tour.stops[0].latitude, lng: tourData.tour.stops[0].longitude },
+          origin: { lat: firstStop.latitude, lng: firstStop.longitude },
           destination: {
-            lat: tourData.tour.stops[tourData.tour.stops.length - 1].latitude,
-            lng: tourData.tour.stops[tourData.tour.stops.length - 1].longitude
+            lat: lastStop.latitude,
+            lng: lastStop.longitude
           },
           waypoints: waypoints,
           travelMode: google.maps.TravelMode.WALKING,
@@ -438,16 +444,16 @@ export default function TourPlayer() {
                 {tourData.audioFiles.intro && (
                   <div className="relative">
                     {/* Timeline Circle */}
-                    <div className="absolute -left-[33px] top-7 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
+                    <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex items-start gap-4">
-                        {tourData.audioFiles.intro.status === "generating" ? (
-                          <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                        ) : tourData.audioFiles.intro.url ? (
+                        {tourData.audioFiles?.intro?.status === "generating" ? (
+                          <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                        ) : tourData.audioFiles?.intro?.url ? (
                           <button
-                            onClick={() => handlePlayPause("intro", tourData.audioFiles.intro.url)}
-                            className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition flex-shrink-0"
+                            onClick={() => handlePlayPause("intro", tourData.audioFiles!.intro!.url!)}
+                            className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
                           >
                             {currentlyPlaying === "intro" ? <Pause size={20} /> : <Play size={20} />}
                           </button>
@@ -461,9 +467,10 @@ export default function TourPlayer() {
                         {tourData.scripts?.intro && (
                           <button
                             onClick={() => toggleScript("intro")}
-                            className="text-sm text-slate-400 hover:text-slate-600 transition whitespace-nowrap"
+                            className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
                           >
-                            {expandedScripts.has("intro") ? "hide script" : "show script"}
+                             <span>{expandedScripts.has("intro") ? 'hide script' : 'show script'}</span>
+                             {expandedScripts.has("intro") ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </button>
                         )}
                       </div>
@@ -484,7 +491,7 @@ export default function TourPlayer() {
                 <div className="my-4 mx-8">
                   <button
                     onClick={() => toggleDirections(-1)}
-                    className="text-[10px] text-emerald-500 hover:text-emerald-700 transition flex items-center gap-1"
+                    className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
                   >
                     <span>{expandedDirections.has(-1) ? '▼' : '▶'}</span>
                     <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to first stop'}</span>
@@ -539,7 +546,7 @@ export default function TourPlayer() {
                           ) : audioFile?.url ? (
                             <button
                               onClick={() => handlePlayPause(audioKey, audioFile.url!)}
-                              className="w-10 h-10 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
+                              className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
                             >
                               {currentlyPlaying === audioKey ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                             </button>
@@ -567,7 +574,7 @@ export default function TourPlayer() {
 
                         {script && expandedScripts.has(audioKey) && (
                           <div className="mt-3 pt-3 border-t border-slate-100">
-                            <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
+                            <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
                               {script.content}
                             </div>
                           </div>
@@ -579,7 +586,7 @@ export default function TourPlayer() {
                       <div className="my-4 mx-8">
                         <button
                           onClick={() => toggleDirections(index)}
-                          className="text-[10px] text-emerald-500 hover:text-emerald-700 transition flex items-center gap-1"
+                          className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
                         >
                           <span>{expandedDirections.has(index) ? '▼' : '▶'}</span>
                           <span>{expandedDirections.has(index) ? 'hide directions' : 'show walking directions'}</span>
@@ -593,12 +600,12 @@ export default function TourPlayer() {
                                   Walking to {tourData.tour!.stops[index + 1].name}
                                 </p>
                                 <p className="text-[10px] text-emerald-700">
-                                  {tourData.tour!.stops[index + 1].walkingDirections.distance} · {tourData.tour!.stops[index + 1].walkingDirections.duration}
+                                  {tourData.tour!.stops[index + 1].walkingDirections?.distance} · {tourData.tour!.stops[index + 1].walkingDirections?.duration}
                                 </p>
                               </div>
                             </div>
                             <ol className="space-y-2 pl-1">
-                              {tourData.tour!.stops[index + 1].walkingDirections.steps.map((step, stepIdx) => (
+                              {tourData.tour!.stops[index + 1].walkingDirections?.steps.map((step, stepIdx) => (
                                 <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
                                   <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
                                   <div className="flex-1">

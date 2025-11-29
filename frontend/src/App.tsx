@@ -587,11 +587,7 @@ function App() {
         {/* STEP 1: Input Form */}
         <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
           <header className="mb-8 text-center">
-            <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
-              Hear &amp; There
-            </p>
-            <h1 className="text-3xl font-semibold text-slate-900 mb-2">Start Your Tour</h1>
-            <p className="text-sm text-slate-600">Where are you starting from?</p>
+            <h1 className="text-3xl font-semibold text-slate-900 mb-2">Hear &amp; There</h1>
           </header>
 
           <form onSubmit={handleSubmit} className="space-y-6">
