@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
+import { Play, Pause, ChevronDown, ChevronUp } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
@@ -361,23 +362,28 @@ export default function TourPlayer() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fefaf6] text-slate-900 px-4 py-10">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
+    <div className="min-h-screen bg-[#fefaf6] text-slate-900">
+      {/* Floating Tour Title */}
+      <div className="sticky top-0 z-20 bg-white/35 backdrop-blur-sm border-b border-sky-100 shadow-sm">
+        <div className="w-full max-w-4xl mx-auto px-4 py-4">
+          <h1 className="text-2xl font-normal text-slate-900 text-center tracking-wider">
+            {tourData.title}
+          </h1>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Header Info */}
         <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
           <div className="text-center mb-6">
-            <p className="text-xs font-semibold tracking-[0.3em] uppercase text-sky-700 mb-2">
-              Hear &amp; There
-            </p>
-            <h1 className="text-3xl font-semibold text-slate-900 mb-2">{tourData.title}</h1>
-            <p className="text-sm text-slate-600 mb-4">{tourData.abstract}</p>
-            <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
-              <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 font-semibold uppercase tracking-wide text-sky-700">
+            <div className="flex items-center justify-center gap-4 text-xs text-slate-500 mb-4">
+              <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 font-semibold uppercase tracking-wide text-sky-700 text-base">
                 {tourData.theme}
               </span>
               <span>⏱️ ~{tourData.estimatedTotalMinutes} min</span>
               <span>📍 {tourData.tour?.stops.length || 0} stops</span>
             </div>
+            <p className="text-base text-slate-600">{tourData.abstract}</p>
           </div>
 
           {/* Map */}
@@ -421,46 +427,57 @@ export default function TourPlayer() {
         {/* Audio Files */}
         {tourData.status === 'complete' && tourData.audioFiles && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <h2 className="text-xl font-semibold text-slate-900 mb-6">🎧 Audioguide</h2>
+            <h2 className="text-2xl font-semibold text-slate-900 mb-6">🎧 Audioguide</h2>
 
-            <div className="space-y-6">
-              {/* Intro */}
-              {tourData.audioFiles.intro && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-3">
-                    {tourData.audioFiles.intro.status === 'generating' ? (
-                      <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                    ) : tourData.audioFiles.intro.url ? (
-                      <button
-                        onClick={() => handlePlayPause('intro', tourData.audioFiles!.intro!.url!)}
-                        className="w-8 h-8 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
-                      >
-                        {currentlyPlaying === 'intro' ? '⏸' : '▶'}
-                      </button>
-                    ) : null}
-                    <div className="flex-1">
-                      <h3 className="text-sm font-semibold text-slate-900">Introduction</h3>
-                      <p className="text-xs text-slate-500">Welcome to your tour</p>
-                    </div>
-                    {tourData.scripts?.intro && (
-                      <button
-                        onClick={() => toggleScript('intro')}
-                        className="text-[10px] text-slate-400 hover:text-slate-600 transition"
-                      >
-                        {expandedScripts.has('intro') ? 'hide script' : 'show script'}
-                      </button>
-                    )}
-                  </div>
+            <div className="relative pl-8">
+              {/* Vertical Timeline */}
+              <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-neutral-300"></div>
 
-                  {tourData.scripts?.intro && expandedScripts.has('intro') && (
-                    <div className="mt-3 pt-3 border-t border-slate-100">
-                      <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
-                        {tourData.scripts.intro.content}
+              <div className="space-y-6">
+                {/* Intro */}
+                {tourData.audioFiles.intro && (
+                  <div className="relative">
+                    {/* Timeline Circle */}
+                    <div className="absolute -left-[33px] top-7 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                      <div className="flex items-start gap-4">
+                        {tourData.audioFiles.intro.status === "generating" ? (
+                          <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        ) : tourData.audioFiles.intro.url ? (
+                          <button
+                            onClick={() => handlePlayPause("intro", tourData.audioFiles.intro.url)}
+                            className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition flex-shrink-0"
+                          >
+                            {currentlyPlaying === "intro" ? <Pause size={20} /> : <Play size={20} />}
+                          </button>
+                        ) : null}
+
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-slate-900">Introduction</h3>
+                          <p className="text-xs text-slate-500">Welcome to your tour</p>
+                        </div>
+
+                        {tourData.scripts?.intro && (
+                          <button
+                            onClick={() => toggleScript("intro")}
+                            className="text-sm text-slate-400 hover:text-slate-600 transition whitespace-nowrap"
+                          >
+                            {expandedScripts.has("intro") ? "hide script" : "show script"}
+                          </button>
+                        )}
                       </div>
+
+                      {tourData.scripts?.intro && expandedScripts.has("intro") && (
+                        <div className="mt-4 pt-4 border-t border-slate-100">
+                          <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
+                            {tourData.scripts.intro.content}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
 
               {/* Walking Directions from Starting Point to First Stop */}
               {tourData.tour && tourData.tour.stops.length > 0 && tourData.tour.stops[0].walkingDirections && (
@@ -473,7 +490,7 @@ export default function TourPlayer() {
                     <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to first stop'}</span>
                   </button>
                   {expandedDirections.has(-1) && (
-                    <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50 shadow-sm">
+                    <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50">
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-lg">🚶</span>
                         <div>
@@ -501,53 +518,61 @@ export default function TourPlayer() {
                 </div>
               )}
 
-              {/* Stops */}
-              {tourData.tour?.stops.map((stop, index) => {
-                const audioFile = tourData.audioFiles?.stops?.[index]
-                const script = tourData.scripts?.stops?.[index]
-                const audioKey = `stop-${index}`
+                {/* Stops */}
+                {tourData.tour?.stops.map((stop, index) => {
+                  const audioFile = tourData.audioFiles?.stops?.[index]
+                  const script = tourData.scripts?.stops?.[index]
+                  const audioKey = `stop-${index}`
 
-                return (
-                  <div key={index}>
-                    {/* Stop Card */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-center gap-3">
-                        {audioFile?.status === 'generating' ? (
-                          <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                        ) : audioFile?.url ? (
-                          <button
-                            onClick={() => handlePlayPause(audioKey, audioFile.url!)}
-                            className="w-8 h-8 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
-                          >
-                            {currentlyPlaying === audioKey ? '⏸' : '▶'}
-                          </button>
-                        ) : null}
-                        <div className="flex-1">
-                          <h3 className="text-sm font-semibold text-slate-900">
-                            {index + 1}. {stop.name}
-                          </h3>
-                          <p className="text-xs text-slate-500">
-                            Dwell {stop.dwellMinutes} min
-                          </p>
-                        </div>
-                        {script && (
-                          <button
-                            onClick={() => toggleScript(audioKey)}
-                            className="text-[10px] text-slate-400 hover:text-slate-600 transition"
-                          >
-                            {expandedScripts.has(audioKey) ? 'hide script' : 'show script'}
-                          </button>
-                        )}
+                  return (
+                    <div key={index} className="relative">
+                      {/* Timeline Marker with Number */}
+                      <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white flex items-center justify-center">
+                        <span className="text-white text-xs font-bold">{index + 1}</span>
                       </div>
 
-                      {script && expandedScripts.has(audioKey) && (
-                        <div className="mt-3 pt-3 border-t border-slate-100">
-                          <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
-                            {script.content}
+                      {/* Stop Card */}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="flex items-center gap-3">
+                          {audioFile?.status === 'generating' ? (
+                            <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                          ) : audioFile?.url ? (
+                            <button
+                              onClick={() => handlePlayPause(audioKey, audioFile.url!)}
+                              className="w-10 h-10 rounded-full bg-[#f36f5e] text-white flex items-center justify-center hover:bg-[#e35f4f] transition"
+                            >
+                              {currentlyPlaying === audioKey ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+                            </button>
+                          ) : null}
+                          <div className="flex-1">
+                            <h3 className="text-normal font-semibold text-slate-900">
+                              {stop.name}
+                            </h3>
+                            {stop.dwellMinutes > 0 && (
+                              <p className="text-xs text-slate-500">
+                                {stop.dwellMinutes} minutes
+                              </p>
+                            )}
                           </div>
+                          {script && (
+                            <button
+                              onClick={() => toggleScript(audioKey)}
+                              className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
+                            >
+                              <span>{expandedScripts.has(audioKey) ? 'hide script' : 'show script'}</span>
+                              {expandedScripts.has(audioKey) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </div>
+
+                        {script && expandedScripts.has(audioKey) && (
+                          <div className="mt-3 pt-3 border-t border-slate-100">
+                            <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-700 leading-relaxed">
+                              {script.content}
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                     {/* Walking Directions - Floating between stops */}
                     {index < tourData.tour!.stops.length - 1 && tourData.tour!.stops[index + 1].walkingDirections && (
@@ -560,7 +585,7 @@ export default function TourPlayer() {
                           <span>{expandedDirections.has(index) ? 'hide directions' : 'show walking directions'}</span>
                         </button>
                         {expandedDirections.has(index) && (
-                          <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50 shadow-sm">
+                          <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50">
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg">🚶</span>
                               <div>
@@ -588,8 +613,9 @@ export default function TourPlayer() {
                       </div>
                     )}
                   </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}
