@@ -241,4 +241,4 @@ All external API calls are wrapped with `@traceable`:
 - Google Cloud service account credentials added as secret
 
 ---
-**Version 1.0.11** - Modular architecture with enhanced caching
+**Version 1.0.12** - Modular architecture with enhanced caching

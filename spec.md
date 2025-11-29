@@ -1,5 +1,5 @@
 
-# Hear & There — Product Specification (v1.0.11)
+# Hear & There — Product Specification (v1.0.12)
 
 > AI-powered walking tour generator with audio guides, shareable tours, and real-time navigation.
 > **Current Status:** Production-ready with modular architecture, two-tier caching, and comprehensive observability.
@@ -16,7 +16,7 @@
 **Cloud Services:** Google Cloud (TTS, Storage)
 **Hosting:** Frontend on Vercel, backend on Railway
 **Monitoring:** LangSmith for AI observability
-**Version:** 1.0.11 — Modular architecture with enhanced caching and performance optimization
+**Version:** 1.0.12 — Modular architecture with enhanced caching and performance optimization
 
 ---
 
@@ -445,7 +445,7 @@ All external API calls are wrapped with `@traceable` for complete visibility:
 ### Versioning
 
 - **Format:** Semantic versioning (e.g., 1.0.11)
-- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.11" }`
+- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.12" }`
 - **Frontend Display:** Version shown in tour player footer
 - **Updates:** Increment with each deployment
 
