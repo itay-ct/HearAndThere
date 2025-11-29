@@ -630,7 +630,7 @@ function App() {
       <div className="w-full max-w-2xl space-y-6">
          <header className="mb-8 text-center">
           <h1 className="text-3xl font-semibold text-slate-900 mb-2">Hear &amp; There</h1>
-          <p>Generate your own personalized audio-guided walking tour.</p>
+          <p>Generate your own personalized audio-guided walking tour</p>
         </header>
         {/* STEP 1: Input Form */}
         <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
