@@ -57,6 +57,16 @@ function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
 
+  // Smooth scroll to bottom utility function
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: 'smooth'
+      })
+    }, 100) // Small delay to ensure DOM has updated
+  }, [])
+
   // Update default voice when language changes
   useEffect(() => {
     if (language === 'hebrew') {
@@ -65,6 +75,34 @@ function App() {
       setSelectedVoice('en-GB-Wavenet-B')
     }
   }, [language])
+
+  // Scroll to bottom when tours are generated
+  useEffect(() => {
+    if (toursGenerated && tours.length > 0) {
+      scrollToBottom()
+    }
+  }, [toursGenerated, tours.length, scrollToBottom])
+
+  // Scroll to bottom when a tour is selected
+  useEffect(() => {
+    if (selectedTour) {
+      scrollToBottom()
+    }
+  }, [selectedTour, scrollToBottom])
+
+  // Scroll to bottom when audioguide generation starts
+  useEffect(() => {
+    if (audioguideGenerating) {
+      scrollToBottom()
+    }
+  }, [audioguideGenerating, scrollToBottom])
+
+  // Scroll to bottom when audioguide is complete
+  useEffect(() => {
+    if (audioguideData) {
+      scrollToBottom()
+    }
+  }, [audioguideData, scrollToBottom])
 
   const stopProgressPolling = useCallback(() => {
     if (progressIntervalRef.current !== null) {
@@ -1038,7 +1076,7 @@ function App() {
                     id="voice-select"
                     value={selectedVoice}
                     onChange={(e) => setSelectedVoice(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
                   >
                     {language === 'hebrew' ? (
                       <>
