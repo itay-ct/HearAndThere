@@ -123,21 +123,85 @@ function App() {
 
   const handleUseMyLocation = useCallback(() => {
     if (!navigator.geolocation) {
+      console.error('[Location] Geolocation API not supported by browser')
       setLocationStatus('error')
       return
     }
 
+    console.log('[Location] Starting location detection...')
+    console.log('[Location] Browser:', navigator.userAgent)
+    console.log('[Location] HTTPS:', window.location.protocol === 'https:')
+
     setLocationStatus('detecting')
 
+    // First attempt: High accuracy (GPS)
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        console.log('[Location] ✅ Success! Position:', {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          timestamp: new Date(pos.timestamp).toISOString()
+        })
         setLatitude(Number(pos.coords.latitude.toFixed(6)))
         setLongitude(Number(pos.coords.longitude.toFixed(6)))
         setLocationStatus('detected')
+        setMessage('') // Clear any previous approximate location message
       },
       (err) => {
-        console.error('Geolocation error', err)
-        setLocationStatus('error')
+        console.error('[Location] ❌ High accuracy geolocation failed:', {
+          code: err.code,
+          message: err.message,
+          PERMISSION_DENIED: err.code === 1,
+          POSITION_UNAVAILABLE: err.code === 2,
+          TIMEOUT: err.code === 3
+        })
+
+        // If POSITION_UNAVAILABLE or TIMEOUT, try fallback with lower accuracy
+        if (err.code === 2 || err.code === 3) {
+          console.log('[Location] Attempting fallback with lower accuracy...')
+
+          // Second attempt: Lower accuracy (WiFi/network-based)
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              console.log('[Location] ✅ Fallback success! Approximate position:', {
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+                accuracy: pos.coords.accuracy,
+                timestamp: new Date(pos.timestamp).toISOString()
+              })
+              setLatitude(Number(pos.coords.latitude.toFixed(6)))
+              setLongitude(Number(pos.coords.longitude.toFixed(6)))
+              setLocationStatus('detected')
+              setMessage('⚠️ Approximate location detected. You can fine-tune it manually if needed.')
+            },
+            (fallbackErr) => {
+              console.error('[Location] ❌ Fallback also failed:', {
+                code: fallbackErr.code,
+                message: fallbackErr.message
+              })
+
+              // No more fallbacks - show error
+              console.error('[Location] All geolocation attempts failed')
+              setLocationStatus('error')
+              setMessage('Unable to detect location. Please enter your coordinates manually.')
+            },
+            {
+              enableHighAccuracy: false, // Use network-based location
+              timeout: 10000,
+              maximumAge: 600000 // Accept cached position up to 10 minutes old
+            }
+          )
+        } else if (err.code === 1) {
+          // PERMISSION_DENIED - no fallback possible
+          console.error('[Location] Permission denied. User blocked location access.')
+          console.error('[Location] Check: Browser permissions, site settings, and system location services')
+          setLocationStatus('error')
+          setMessage('Location permission denied. Please enable location access in your browser settings.')
+        } else {
+          console.error('[Location] Unknown error occurred')
+          setLocationStatus('error')
+        }
       },
       {
         enableHighAccuracy: true,
@@ -176,9 +240,10 @@ function App() {
 
     // Only detect location if not already showing inputs
     if (!showLocationInputs) {
+      console.log('[Location] Button clicked, current status:', locationStatus)
       handleUseMyLocation()
     }
-  }, [showLocationInputs, handleUseMyLocation])
+  }, [showLocationInputs, handleUseMyLocation, locationStatus])
 
   const DURATION_OPTIONS = [30, 60, 90, 120, 180]
 
@@ -670,7 +735,7 @@ function App() {
                     ) : locationStatus === 'error' ? (
                       <>
                         <MapPinOff className="w-5 h-5" />
-                        <span className="text-sm font-medium">Location cannot be detected</span>
+                        <span className="text-sm font-medium">Location cannot be detected - Try Again</span>
                       </>
                     ) : (
                       <>

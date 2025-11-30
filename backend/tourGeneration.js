@@ -5,6 +5,7 @@ import { createTourState } from './utils/tourState.js';
 import { createCheckCacheForTourSuggestionsNode } from './nodes/cache/checkCacheForTourSuggestions.js';
 import { createCheckPoiCacheNode } from './nodes/cache/checkPoiCache.js';
 import { createSaveTourSuggestionsToCache } from './nodes/cache/saveTourSuggestionsToCache.js';
+import { createSavePoiToCacheNode } from './nodes/cache/savePoiToCache.js';
 
 // Import POI nodes
 import { createFetchPoisFromGoogleMapsNode } from './nodes/poi/fetchPoisFromGoogleMaps.js';
@@ -144,15 +145,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     redisClient
   });
 
-  const saveTourSuggestionsToCache = createSaveTourSuggestionsToCache({
-    durationMinutes: normalizedDuration,
-    language,
-    longitude,
-    latitude,
-    customization,
-    redisClient
-  });
-
   // Routing functions
   const shouldCheckCache = (state) => {
     // Check cache only if no customization
@@ -182,17 +174,9 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     return 'fetch_pois_from_google_maps';
   };
 
-  const shouldSaveToCache = (state) => {
-    // Only save to cache if no customization
-    if (customization && customization.trim().length > 0) {
-      console.log('[tourGeneration] Routing: Skip cache save (customization provided)');
-      return END;
-    }
-    console.log('[tourGeneration] Routing: Save to cache');
-    return 'save_tour_suggestions_to_cache';
-  };
-
   // Build and compile graph
+  // Note: Cache saving nodes (savePoiToCache, saveTourSuggestionsToCache) are NOT in the graph
+  // They will be called asynchronously after the graph completes to avoid blocking the user response
   const graph = new StateGraph(TourState)
     .addNode('check_cache_for_tour_suggestions', checkCacheForTourSuggestionsNode)
     .addNode('check_poi_cache', checkPoiCacheNode)
@@ -203,7 +187,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     .addNode('assemble_area_context', assembleAreaContextNode)
     .addNode('generate_candidate_tours', generateCandidatesNode)
     .addNode('validate_walking_times', validateWalkingTimesNode)
-    .addNode('save_tour_suggestions_to_cache', saveTourSuggestionsToCache)
     // Routing
     .addConditionalEdges(
       START,
@@ -235,15 +218,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     .addEdge('generate_area_summaries', 'assemble_area_context')
     .addEdge('assemble_area_context', 'generate_candidate_tours')
     .addEdge('generate_candidate_tours', 'validate_walking_times')
-    .addConditionalEdges(
-      'validate_walking_times',
-      shouldSaveToCache,
-      {
-        [END]: END,
-        'save_tour_suggestions_to_cache': 'save_tour_suggestions_to_cache'
-      }
-    )
-    .addEdge('save_tour_suggestions_to_cache', END);
+    .addEdge('validate_walking_times', END);
 
   // Compile graph with checkpointer if available
   let checkpointer = null;
@@ -294,9 +269,58 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   const neighborhood = finalState.areaContext?.neighborhood || null;
   const tours = finalState.finalTours || [];
 
+  // Fire off cache operations asynchronously (don't await)
+  // This allows the user to receive their response immediately while caching happens in the background
+  saveCacheAsync({
+    finalState,
+    durationMinutes,
+    language,
+    longitude,
+    latitude,
+    customization,
+    redisClient
+  }).catch(err => {
+    console.error('[tourGeneration] Background cache save failed:', err);
+  });
+
   return {
     city,
     neighborhood,
     tours,
   };
+}
+
+/**
+ * Save POIs and tour suggestions to cache asynchronously
+ * This runs in the background after the user receives their response
+ */
+async function saveCacheAsync({ finalState, durationMinutes, language, longitude, latitude, customization, redisClient }) {
+  console.log('[tourGeneration] Starting background cache operations...');
+
+  try {
+    // Create cache node instances
+    const savePoiToCache = createSavePoiToCacheNode({ redisClient });
+    const saveTourSuggestionsToCache = createSaveTourSuggestionsToCache({
+      durationMinutes,
+      language,
+      longitude,
+      latitude,
+      customization,
+      redisClient
+    });
+
+    // Run both cache operations in parallel
+    await Promise.all([
+      savePoiToCache(finalState).catch(err => {
+        console.error('[tourGeneration] POI cache save failed:', err);
+      }),
+      saveTourSuggestionsToCache(finalState).catch(err => {
+        console.error('[tourGeneration] Tour suggestions cache save failed:', err);
+      })
+    ]);
+
+    console.log('[tourGeneration] ✅ Background cache operations completed');
+  } catch (err) {
+    console.error('[tourGeneration] Background cache operations failed:', err);
+  }
 }

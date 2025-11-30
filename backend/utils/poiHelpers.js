@@ -244,12 +244,8 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
     }
   }
 
-  // Cache all places in Redis
-  if (redisClient) {
-    await Promise.all(
-      uniqueResults.map(place => cachePlaceInRedis(redisClient, place))
-    );
-  }
+  // Note: POI caching is now handled by the savePoiToCache node
+  // This allows caching to happen asynchronously without blocking the user request
 
   debugLog('searchNearbyPois: got unique results count', uniqueResults.length);
   return uniqueResults.slice(0, 20);

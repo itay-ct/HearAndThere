@@ -444,8 +444,8 @@ All external API calls are wrapped with `@traceable` for complete visibility:
 
 ### Versioning
 
-- **Format:** Semantic versioning (e.g., 1.0.11)
-- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.12" }`
+- **Format:** Semantic versioning (e.g., 1.0.13)
+- **Backend Health:** `GET /health` returns `{ status: "ok", version: "1.0.13" }`
 - **Frontend Display:** Version shown in tour player footer
 - **Updates:** Increment with each deployment
 
