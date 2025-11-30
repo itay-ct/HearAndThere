@@ -443,6 +443,7 @@ export default function TourPlayer() {
           <div
             ref={mapRef}
             className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100 mb-6"
+            style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
           />
         </div>
 

@@ -296,7 +296,7 @@ ${isLast ? 'End with a memorable closing that thanks them and wishes them well.'
  * Synthesize text to speech using Google Cloud TTS REST API with service account
  * and upload to Google Cloud Storage
  */
-const synthesizeAudio = traceable(async ({ text, outputFileName, language }) => {
+const synthesizeAudio = traceable(async ({ text, outputFileName, language, voice }) => {
   // Google TTS has a 5000 byte limit for text input
   const MAX_BYTES = 4998; // Leave small buffer
 
@@ -325,16 +325,15 @@ const synthesizeAudio = traceable(async ({ text, outputFileName, language }) => 
     console.warn(`[audioguide] Trimmed to: ${finalBytes} bytes (${Math.round((finalBytes/textBytes)*100)}% of original)`);
   }
 
-  // Select voice based on language
-  const voiceConfig = language === 'hebrew'
-    ? {
-        languageCode: 'he-IL',
-        name: 'he-IL-Chirp3-HD-Alnilam', // Hebrew female voice
-      }
-    : {
-        languageCode: 'en-US',
-        name: 'en-US-Chirp3-HD-Charon', // English Chirp3-HD voice
-      };
+  // Determine language code from voice name
+  const languageCode = voice.startsWith('he-') ? 'he-IL' :
+                       voice.startsWith('en-GB-') ? 'en-GB' : 'en-US';
+
+  // Use the provided voice
+  const voiceConfig = {
+    languageCode: languageCode,
+    name: voice,
+  };
 
   const requestBody = {
     input: { text: processedText },
@@ -400,7 +399,7 @@ const synthesizeAudio = traceable(async ({ text, outputFileName, language }) => 
 /**
  * Build the audioguide generation graph
  */
-export async function buildAudioguideGraph({ sessionId, tourId, language, redisClient }) {
+export async function buildAudioguideGraph({ sessionId, tourId, language, voice, redisClient }) {
   const modules = await getLangGraphModules();
   if (!modules) {
     throw new Error('LangGraph modules not available');
@@ -425,6 +424,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, redisC
     language: Annotation({
       reducer: (x, y) => y ?? x,
       default: () => 'english',
+    }),
+    voice: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => 'en-GB-Wavenet-B',
     }),
     scripts: Annotation({
       reducer: (x, y) => {
@@ -596,20 +599,20 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, redisC
 
   // Node: Synthesize a single audio file (intro or stop)
   const synthesizeAudioNode = async (state) => {
-    const { audioType, stopIndex, text, tourId, language } = state;
+    const { audioType, stopIndex, text, tourId, language, voice } = state;
 
     if (!text) {
       console.warn(`[audioguide] No text available for ${audioType} at stopIndex ${stopIndex}`);
       return {};
     }
 
-    console.log(`[audioguide] Synthesizing ${audioType} audio, stopIndex:`, stopIndex, 'language:', language);
+    console.log(`[audioguide] Synthesizing ${audioType} audio, stopIndex:`, stopIndex, 'language:', language, 'voice:', voice);
 
     const fileName = audioType === 'intro'
       ? `${tourId}_intro.mp3`
       : `${tourId}_stop_${stopIndex}.mp3`;
 
-    const audioUrl = await synthesizeAudio({ text, outputFileName: fileName, language });
+    const audioUrl = await synthesizeAudio({ text, outputFileName: fileName, language, voice });
 
     if (audioType === 'intro') {
       return {
@@ -656,10 +659,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, redisC
 /**
  * Main function to generate audioguide for a tour
  */
-export async function generateAudioguide({ sessionId, tourId, selectedTour, areaContext, language, redisClient }) {
-  console.log('[audioguide] Starting audioguide generation for tour:', tourId, 'language:', language);
+export async function generateAudioguide({ sessionId, tourId, selectedTour, areaContext, language, voice, redisClient }) {
+  console.log('[audioguide] Starting audioguide generation for tour:', tourId, 'language:', language, 'voice:', voice);
 
-  const graph = await buildAudioguideGraph({ sessionId, tourId, language, redisClient });
+  const graph = await buildAudioguideGraph({ sessionId, tourId, language, voice, redisClient });
 
   const config = {
     configurable: { thread_id: `${sessionId}_audioguide_${tourId}` },
@@ -671,6 +674,7 @@ export async function generateAudioguide({ sessionId, tourId, selectedTour, area
       selectedTour,
       areaContext,
       language: language || 'english',
+      voice: voice || (language === 'hebrew' ? 'he-IL-Standard-D' : 'en-GB-Wavenet-B'),
     },
     config
   );

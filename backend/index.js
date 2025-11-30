@@ -242,6 +242,7 @@ async function start() {
   // Generate audioguide for a specific tour
   app.post('/api/session/:sessionId/tour/:tourId/audioguide', async (req, res) => {
     const { sessionId, tourId } = req.params;
+    const { voice } = req.body || {};
 
     if (!sessionId || !tourId) {
       return res.status(400).json({ error: 'sessionId and tourId are required' });
@@ -283,6 +284,9 @@ async function start() {
 
       // Get language preference from session
       const language = sessionData.language || 'english';
+
+      // Get voice preference from request body (defaults based on language)
+      const selectedVoice = voice || (language === 'hebrew' ? 'he-IL-Standard-D' : 'en-GB-Wavenet-B');
 
       // Use the tour's existing UUID (assigned during generation)
       // This ensures consistency: toursuggest:{UUID} → tour:{UUID}
@@ -334,6 +338,7 @@ async function start() {
         estimatedTotalMinutes: selectedTour.estimatedTotalMinutes,
         duration: selectedTour.estimatedTotalMinutes, // For RediSearch NUMERIC query
         language,
+        voice: selectedVoice, // Store selected voice
         // Store starting point coordinates (separate for backward compatibility)
         startLatitude,
         startLongitude,
@@ -351,7 +356,7 @@ async function start() {
       await redisClient.json.set(tourDataKey, '$', tourDocument);
 
       // Start audioguide generation (async)
-      console.log('[api] Starting audioguide generation for shareable tour:', shareableTourId, 'language:', language);
+      console.log('[api] Starting audioguide generation for shareable tour:', shareableTourId, 'language:', language, 'voice:', selectedVoice);
 
       // Return immediately with the shareable tour ID
       res.status(202).json({
@@ -368,6 +373,7 @@ async function start() {
         selectedTour,
         areaContext,
         language,
+        voice: selectedVoice,
         redisClient,
       }).then(async (result) => {
         console.log('[api] Audioguide generation completed for tour:', shareableTourId);

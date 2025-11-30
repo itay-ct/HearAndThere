@@ -50,11 +50,21 @@ function App() {
   const [shareableTourId, setShareableTourId] = useState<string | null>(null)
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
   const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
+  const [selectedVoice, setSelectedVoice] = useState<string>('en-GB-Wavenet-B')
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
+
+  // Update default voice when language changes
+  useEffect(() => {
+    if (language === 'hebrew') {
+      setSelectedVoice('he-IL-Standard-D')
+    } else {
+      setSelectedVoice('en-GB-Wavenet-B')
+    }
+  }, [language])
 
   const stopProgressPolling = useCallback(() => {
     if (progressIntervalRef.current !== null) {
@@ -469,6 +479,7 @@ function App() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice: selectedVoice }),
         }
       )
 
@@ -496,7 +507,7 @@ function App() {
       setMessage('Failed to start audioguide generation')
       setAudioguideGenerating(false)
     }
-  }, [sessionId, selectedTour, startAudioguidePolling])
+  }, [sessionId, selectedTour, selectedVoice, startAudioguidePolling])
 
   const handlePlayAudio = useCallback((audioUrl: string, audioId: string) => {
     // Stop currently playing audio
@@ -990,6 +1001,7 @@ function App() {
               <div
                 id="tour-map"
                 className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100 mb-6"
+                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
               />
             )}
 
@@ -1014,15 +1026,43 @@ function App() {
               </ol>
             </div>
 
-            {/* STEP 4: Generate Audioguide Button */}
+            {/* STEP 4: Voice Selection & Generate Audioguide Button */}
             {!audioguideData && !audioguideGenerating && !audioguideError && (
-              <button
-                type="button"
-                onClick={handleGenerateAudioguide}
-                className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-              >
-                🎧 Generate Audioguide
-              </button>
+              <div className="space-y-4">
+                {/* Voice Selection */}
+                <div>
+                  <label htmlFor="voice-select" className="block text-xs font-medium text-slate-700 mb-2">
+                    🎙️ Select Voice
+                  </label>
+                  <select
+                    id="voice-select"
+                    value={selectedVoice}
+                    onChange={(e) => setSelectedVoice(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+                  >
+                    {language === 'hebrew' ? (
+                      <>
+                        <option value="he-IL-Standard-D">Hebrew - Standard (Default)</option>
+                        <option value="he-IL-Chirp3-HD-Alnilam">Hebrew - Chirp3 HD</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="en-GB-Wavenet-B">English (UK) - Wavenet (Default)</option>
+                        <option value="en-US-Chirp3-HD-Algenib">English (US) - Chirp3 HD</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  type="button"
+                  onClick={handleGenerateAudioguide}
+                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                >
+                  🎧 Generate Audioguide
+                </button>
+              </div>
             )}
           </div>
         )}
