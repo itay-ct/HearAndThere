@@ -487,7 +487,7 @@ export default function TourPlayer() {
               {/* Vertical Timeline */}
               <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-neutral-300"></div>
 
-              <div className="space-y-6">
+              <div className="relative">
                 {/* Intro */}
                 {tourData.audioFiles.intro && (
                   <div className="relative">
@@ -495,13 +495,13 @@ export default function TourPlayer() {
                     <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-start gap-4">
+                      <div className="flex items-center gap-3">
                         {tourData.audioFiles?.intro?.status === "generating" ? (
                           <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
                         ) : tourData.audioFiles?.intro?.url ? (
                           <button
                             onClick={() => handlePlayPause("intro", tourData.audioFiles!.intro!.url!)}
-                            className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
+                            className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
                           >
                             {currentlyPlaying === "intro" ? <Pause size={20} /> : <Play size={20} />}
                           </button>
@@ -549,17 +549,17 @@ export default function TourPlayer() {
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-lg">🚶</span>
                         <div>
-                          <p className="text-xs text-emerald-900 font-semibold">
+                          <p className="text-normal text-emerald-900 font-semibold">
                             Walking to {tourData.tour.stops[0].name}
                           </p>
-                          <p className="text-[10px] text-emerald-700">
+                          <p className="text-xs text-emerald-700">
                             {tourData.tour.stops[0].walkingDirections.distance} · {tourData.tour.stops[0].walkingDirections.duration}
                           </p>
                         </div>
                       </div>
                       <ol className="space-y-2 pl-1">
                         {tourData.tour.stops[0].walkingDirections.steps.map((step, stepIdx) => (
-                          <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
+                          <li key={stepIdx} className="text-xs text-emerald-800 flex gap-2">
                             <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
                             <div className="flex-1">
                               <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
@@ -594,7 +594,7 @@ export default function TourPlayer() {
                           ) : audioFile?.url ? (
                             <button
                               onClick={() => handlePlayPause(audioKey, audioFile.url!)}
-                              className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
+                              className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
                             >
                               {currentlyPlaying === audioKey ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                             </button>
@@ -644,17 +644,17 @@ export default function TourPlayer() {
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg">🚶</span>
                               <div>
-                                <p className="text-xs text-emerald-900 font-semibold">
+                                <p className="text-normal text-emerald-900 font-semibold">
                                   Walking to {tourData.tour!.stops[index + 1].name}
                                 </p>
-                                <p className="text-[10px] text-emerald-700">
+                                <p className="text-xs text-emerald-700">
                                   {tourData.tour!.stops[index + 1].walkingDirections?.distance} · {tourData.tour!.stops[index + 1].walkingDirections?.duration}
                                 </p>
                               </div>
                             </div>
                             <ol className="space-y-2 pl-1">
                               {tourData.tour!.stops[index + 1].walkingDirections?.steps.map((step, stepIdx) => (
-                                <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
+                                <li key={stepIdx} className="text-xs text-emerald-800 flex gap-2">
                                   <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
                                   <div className="flex-1">
                                     <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
