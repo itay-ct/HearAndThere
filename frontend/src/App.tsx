@@ -960,7 +960,7 @@ function App() {
                     {tours.map((tour) => (
                       <article
                         key={tour.id}
-                        className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 shadow-sm bg-white/90 ${
+                        className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 bg-white/90 ${
                           selectedTourId === tour.id
                             ? 'border-[#f36f5e] ring-1 ring-[#f36f5e]/40'
                             : 'border-slate-200'
@@ -998,7 +998,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => handleSelectTour(tour)}
-                          className="inline-flex w-full items-center justify-center rounded-xl bg-[#f36f5e] px-3 py-2 text-xs font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                          className="inline-flex w-full items-center justify-center rounded-xl bg-[#f36f5e] px-3 py-2 text-xs font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
                         >
                           {selectedTourId === tour.id ? 'Selected' : 'Select this tour'}
                         </button>

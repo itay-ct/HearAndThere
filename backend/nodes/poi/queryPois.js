@@ -33,6 +33,19 @@ export function createQueryPoisNode({ latitude, longitude, durationMinutes, redi
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
 
+    // If POIs already exist in state (from fetchPoisFromGoogleMaps), use them
+    // This happens when POI cache miss triggers Google Maps fetch
+    if (state.pois && state.pois.length > 0) {
+      console.log(`[queryPois] Using ${state.pois.length} POIs already in state (from Google Maps fetch)`);
+      debugLog('Skipping Redis query - POIs already fetched from Google Maps');
+
+      return {
+        messages,
+        pois: state.pois,
+        poisCount: state.pois.length
+      };
+    }
+
     try {
       console.log('[queryPois] Querying POIs from Redis cache...');
       debugLog('Querying POIs for', { latitude, longitude, durationMinutes });
@@ -62,7 +75,7 @@ export function createQueryPoisNode({ latitude, longitude, durationMinutes, redi
       };
     } catch (err) {
       console.error('[queryPois] Failed to query POIs from Redis:', err);
-      
+
       const errorMsg = {
         role: 'assistant',
         content: 'Failed to query POIs from Redis cache. Using empty POI list.'
