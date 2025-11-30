@@ -17,8 +17,12 @@ function getGoogleCredentials() {
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
       // Production: Parse JSON from environment variable
       googleCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+      console.log('[audioguide] Using Google Cloud credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON');
+      console.log('[audioguide] Project ID:', googleCredentials.project_id);
+      console.log('[audioguide] Service Account:', googleCredentials.client_email);
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       // Development: Use file path
+      console.log('[audioguide] Using Google Cloud credentials from file:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
       googleCredentials = null; // Let Google libraries auto-detect
     } else {
       throw new Error('Google Cloud credentials not configured. Set GOOGLE_APPLICATION_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS');
