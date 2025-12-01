@@ -252,11 +252,15 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
 }, { name: 'searchNearbyPois', run_type: 'tool' });
 
 /**
- * Query POIs from Redis using RediSearch with intelligent fallback logic
- * 1. Query primary POIs within radiusMeters
- * 2. If < 40, query all POIs within radiusMeters
- * 3. If still < 40, query all POIs within radiusMeters * 1.5
- * All queries sorted by distance using RediSearch GEO queries
+ * Query POIs from Redis using RediSearch FT.AGGREGATE with intelligent fallback logic
+ * 1. Query primary POIs within radiusMeters (limited to 40, sorted by distance)
+ * 2. If < 40, query all POIs within radiusMeters (limited to 40, sorted by distance)
+ * 3. If still < 40, query all POIs within radiusMeters * 1.5 (limited to 40, sorted by distance)
+ *
+ * Uses FT.AGGREGATE with:
+ * - GEODISTANCE to calculate distance from center point
+ * - SORTBY to sort by distance ascending
+ * - MAX 40 to limit results natively in Redis
  */
 export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
   if (!redisClient) {
@@ -270,7 +274,8 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
   try {
     console.log(`[poiHelpers] Querying RediSearch for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
 
-    // Helper function to execute RediSearch geospatial query
+    // Helper function to execute RediSearch geospatial query using FT.AGGREGATE
+    // This uses native Redis sorting by distance and limits to 40 results
     const searchPois = async (radius, filterPrimary = false) => {
       // RediSearch GEO query syntax: @location:[lon lat radius unit]
       // Build query with GEO filter + optional primary filter
@@ -280,44 +285,79 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
       }
 
       try {
-        debugLog('RediSearch query:', query);
+        debugLog('RediSearch FT.AGGREGATE query:', query);
 
-        const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
-          LIMIT: { from: 0, size: 100 }
+        // Use FT.AGGREGATE with LOAD, APPLY (GEODISTANCE), SORTBY, and LIMIT
+        // This performs sorting and limiting natively in Redis
+        const results = await redisClient.ft.aggregate(POI_INDEX_NAME, query, {
+          LOAD: ['$.place_id', '$.name', '$.location', '$.types', '$.rating', '$.primary'],
+          STEPS: [
+            {
+              type: 'APPLY',
+              expression: `geodistance(@location, ${longitude}, ${latitude})`,
+              AS: 'distance'
+            },
+            {
+              type: 'SORTBY',
+              BY: ['@distance', 'ASC'],
+              MAX: 40  // Limit to 40 results, sorted by distance
+            }
+          ]
         });
 
-        debugLog('RediSearch returned', results.total, 'results');
+        debugLog('RediSearch FT.AGGREGATE returned', results.total, 'results');
 
-        // Parse results
+        // Parse results from FT.AGGREGATE
         const pois = [];
-        if (results.documents) {
-          for (const doc of results.documents) {
+        if (results.results) {
+          for (const result of results.results) {
             try {
-              // Get full document
-              const poiDoc = await redisClient.json.get(doc.id, { path: '$' });
-              if (poiDoc && poiDoc[0]) {
+              // FT.AGGREGATE returns results as key-value pairs
+              const getValue = (key) => {
+                const index = result.findIndex(item => item === key);
+                return index !== -1 && index + 1 < result.length ? result[index + 1] : null;
+              };
+
+              const locationStr = getValue('$.location');
+              const placeId = getValue('$.place_id');
+              const name = getValue('$.name');
+              const typesStr = getValue('$.types');
+              const rating = getValue('$.rating');
+              const primary = getValue('$.primary');
+
+              if (locationStr && placeId) {
                 // Parse location string "lon,lat" to extract coordinates
-                const [lon, lat] = poiDoc[0].location.split(',').map(parseFloat);
+                const [lon, lat] = locationStr.split(',').map(parseFloat);
+
+                // Parse types array (stored as JSON string)
+                let types = [];
+                if (typesStr) {
+                  try {
+                    types = JSON.parse(typesStr);
+                  } catch (e) {
+                    types = [];
+                  }
+                }
 
                 pois.push({
-                  id: poiDoc[0].place_id,
-                  name: poiDoc[0].name,
+                  id: placeId,
+                  name: name || 'Unknown Place',
                   latitude: lat,
                   longitude: lon,
-                  types: poiDoc[0].types || [],
-                  rating: poiDoc[0].rating,
-                  primary: poiDoc[0].primary
+                  types: types,
+                  rating: rating ? parseFloat(rating) : null,
+                  primary: primary === 'true' || primary === true
                 });
               }
             } catch (err) {
-              console.warn(`[poiHelpers] Failed to parse POI document ${doc.id}:`, err.message);
+              console.warn(`[poiHelpers] Failed to parse POI result:`, err.message);
             }
           }
         }
 
         return pois;
       } catch (err) {
-        console.error('[poiHelpers] RediSearch query failed:', err);
+        console.error('[poiHelpers] RediSearch FT.AGGREGATE query failed:', err);
         console.error('[poiHelpers] Query was:', query);
         return [];
       }
@@ -342,10 +382,9 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
       }
     }
 
-    // Return top 40 POIs (already sorted by distance from RediSearch)
-    const result = pois.slice(0, 40);
-    console.log(`[poiHelpers] Returning ${result.length} POIs for tour generation`);
-    return result;
+    // POIs are already limited to 40 and sorted by distance from FT.AGGREGATE
+    console.log(`[poiHelpers] Returning ${pois.length} POIs for tour generation`);
+    return pois;
 
   } catch (err) {
     console.error('[poiHelpers] Failed to query POIs from Redis:', err);
