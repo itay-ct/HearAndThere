@@ -299,8 +299,12 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
             },
             {
               type: 'SORTBY',
-              BY: ['@distance', 'ASC'],
-              MAX: 40  // Limit to 40 results, sorted by distance
+              BY: '@distance'
+            },
+            {
+              type: 'LIMIT',
+              from: 0,
+              size: 40
             }
           ]
         });
