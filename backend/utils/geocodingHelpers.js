@@ -215,9 +215,12 @@ export async function writeSummaryToCache(redisClient, entityType, entityName, s
   const cacheKey = `summary_cache:${entityType}:${entityName}`;
 
   try {
-    await redisClient.set(cacheKey, JSON.stringify(summary), {
-      EX: 30 * 24 * 60 * 60 // 30 days TTL
-    });
+    // Use Redis JSON.SET to store the summary as JSON
+    await redisClient.json.set(cacheKey, '$', summary);
+
+    // Set TTL separately (30 days)
+    await redisClient.expire(cacheKey, 30 * 24 * 60 * 60);
+
     debugLog(`writeSummaryToCache: cached ${entityType} summary for ${entityName}`);
   } catch (err) {
     console.error(`[geocodingHelpers] Failed to cache ${entityType} summary for ${entityName}:`, err);
@@ -240,10 +243,11 @@ export async function readSummaryFromCache(redisClient, entityType, entityName) 
   const cacheKey = `summary_cache:${entityType}:${entityName}`;
 
   try {
-    const cached = await redisClient.get(cacheKey);
+    // Use Redis JSON.GET to retrieve the summary as JSON
+    const cached = await redisClient.json.get(cacheKey);
     if (cached) {
       debugLog(`readSummaryFromCache: cache hit for ${entityType} ${entityName}`);
-      return JSON.parse(cached);
+      return cached;
     }
     debugLog(`readSummaryFromCache: cache miss for ${entityType} ${entityName}`);
     return null;
