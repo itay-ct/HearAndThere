@@ -1189,6 +1189,12 @@ function App() {
         )}
       </div>
       <div className="mt-8 text-center space-y-1">
+        <p className="text-xs text-slate-300 font-light opacity-50 hover:opacity-100 transition-opacity">
+          Reverse geocoding by{" "}
+          <a href="https://locationiq.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">
+            LocationIQ.com
+          </a>
+        </p>
         {sessionId && (
           <p className="text-xs text-slate-300 font-light">{sessionId}</p>
         )}
