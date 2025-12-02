@@ -51,6 +51,7 @@ function App() {
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
   const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
   const [selectedVoice, setSelectedVoice] = useState<string>('en-GB-Wavenet-B')
+  const [locationDisplayText, setLocationDisplayText] = useState<string>('')
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
@@ -169,6 +170,43 @@ function App() {
     Number.isFinite(latitude) &&
     Number.isFinite(longitude)
 
+  // Call reverse geocode API to get city and neighborhood
+  const fetchLocationDetails = useCallback(async (lat: number, lon: number) => {
+    try {
+      console.log('[Location] Fetching location details for:', { lat, lon })
+      const response = await fetch(`${API_BASE_URL}/api/reverse-geocode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: lat, longitude: lon })
+      })
+
+      if (!response.ok) {
+        console.error('[Location] Reverse geocode failed with status:', response.status)
+        return
+      }
+
+      const data = await response.json()
+      console.log('[Location] Reverse geocode result:', data)
+
+      const { city: cityName, neighborhood: neighborhoodName } = data
+
+      // Update state
+      if (cityName) setCity(cityName)
+      if (neighborhoodName) setNeighborhood(neighborhoodName)
+
+      // Update display text
+      if (neighborhoodName && cityName) {
+        setLocationDisplayText(`${neighborhoodName}, ${cityName}`)
+      } else if (cityName) {
+        setLocationDisplayText(cityName)
+      } else if (neighborhoodName) {
+        setLocationDisplayText(neighborhoodName)
+      }
+    } catch (error) {
+      console.error('[Location] Failed to fetch location details:', error)
+    }
+  }, [])
+
   const handleUseMyLocation = useCallback(() => {
     if (!navigator.geolocation) {
       console.error('[Location] Geolocation API not supported by browser')
@@ -191,10 +229,15 @@ function App() {
           accuracy: pos.coords.accuracy,
           timestamp: new Date(pos.timestamp).toISOString()
         })
-        setLatitude(Number(pos.coords.latitude.toFixed(6)))
-        setLongitude(Number(pos.coords.longitude.toFixed(6)))
+        const lat = Number(pos.coords.latitude.toFixed(6))
+        const lon = Number(pos.coords.longitude.toFixed(6))
+        setLatitude(lat)
+        setLongitude(lon)
         setLocationStatus('detected')
         setMessage('') // Clear any previous approximate location message
+
+        // Fetch location details (city, neighborhood)
+        fetchLocationDetails(lat, lon)
       },
       (err) => {
         console.error('[Location] ❌ High accuracy geolocation failed:', {
@@ -218,10 +261,15 @@ function App() {
                 accuracy: pos.coords.accuracy,
                 timestamp: new Date(pos.timestamp).toISOString()
               })
-              setLatitude(Number(pos.coords.latitude.toFixed(6)))
-              setLongitude(Number(pos.coords.longitude.toFixed(6)))
+              const lat = Number(pos.coords.latitude.toFixed(6))
+              const lon = Number(pos.coords.longitude.toFixed(6))
+              setLatitude(lat)
+              setLongitude(lon)
               setLocationStatus('detected')
               setMessage('⚠️ Approximate location detected. You can fine-tune it manually if needed.')
+
+              // Fetch location details (city, neighborhood)
+              fetchLocationDetails(lat, lon)
             },
             (fallbackErr) => {
               console.error('[Location] ❌ Fallback also failed:', {
@@ -352,7 +400,9 @@ function App() {
         durationMinutes,
         sessionId: clientSessionId,
         customization: customization.trim() || undefined,
-        language
+        language,
+        ...(city && { city }),
+        ...(neighborhood && { neighborhood })
       }
 
       console.log('=== API REQUEST DEBUG ===')
@@ -779,7 +829,9 @@ function App() {
                     ) : locationStatus === 'detected' ? (
                       <>
                         <MapPinned className="w-5 h-5" />
-                        <span className="text-sm font-medium">Location Detected</span>
+                        <span className="text-sm font-medium">
+                          {locationDisplayText || 'Location Detected'}
+                        </span>
                       </>
                     ) : locationStatus === 'error' ? (
                       <>

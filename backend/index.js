@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { readFileSync } from 'fs';
 import { generateTours } from './tourGeneration.js';
 import { generateAudioguide } from './audioguideGeneration.js';
+import { reverseGeocode } from './utils/geocodingHelpers.js';
 
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 const { version } = packageJson;
@@ -75,6 +76,35 @@ async function start() {
     }
   });
 
+  // Reverse geocode endpoint - returns city and neighborhood for given coordinates
+  app.post('/api/reverse-geocode', async (req, res) => {
+    const { latitude, longitude } = req.body || {};
+
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      return res.status(400).json({
+        error: 'Invalid payload. Expected numeric latitude and longitude.',
+      });
+    }
+
+    console.log('[api/reverse-geocode] Request:', { latitude, longitude });
+
+    try {
+      const { city, neighborhood } = await reverseGeocode(latitude, longitude);
+
+      console.log('[api/reverse-geocode] Result:', { city, neighborhood });
+
+      res.json({
+        city: city || null,
+        neighborhood: neighborhood || null,
+      });
+    } catch (err) {
+      console.error('[api/reverse-geocode] Error:', err);
+      res.status(500).json({
+        error: 'Failed to reverse geocode location',
+      });
+    }
+  });
+
   // Normalize duration to discrete values for better caching
   function normalizeDuration(durationMinutes) {
     const allowedDurations = [30, 60, 90, 120, 180]; // 30min, 1h, 1.5h, 2h, 3h
@@ -102,6 +132,8 @@ async function start() {
       sessionId: clientSessionId,
       customization,
       language,
+      city: providedCity,
+      neighborhood: providedNeighborhood,
     } = req.body || {};
 
     if (
@@ -131,6 +163,8 @@ async function start() {
       durationMinutes: `${durationMinutes} (normalized from ${rawDuration})`,
       customization,
       language,
+      city: providedCity || '(not provided)',
+      neighborhood: providedNeighborhood || '(not provided)',
     });
 
     try {
@@ -146,8 +180,8 @@ async function start() {
 
       await redisClient.hSet(key, sessionData);
 
-      let city = null;
-      let neighborhood = null;
+      let city = providedCity || null;
+      let neighborhood = providedNeighborhood || null;
       let tours = [];
 
       try {
@@ -158,10 +192,13 @@ async function start() {
           durationMinutes,
           customization,
           language,
+          city: providedCity || null,
+          neighborhood: providedNeighborhood || null,
           redisClient,
         });
-        city = result.city || null;
-        neighborhood = result.neighborhood || null;
+        // Use provided values if available, otherwise use generated values
+        city = providedCity || result.city || null;
+        neighborhood = providedNeighborhood || result.neighborhood || null;
         tours = Array.isArray(result.tours) ? result.tours : [];
 
         const extraFields = {};

@@ -126,7 +126,9 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     longitude
   });
 
-  const generateAreaSummariesNode = createGenerateAreaSummariesNode();
+  const generateAreaSummariesNode = createGenerateAreaSummariesNode({
+    redisClient
+  });
 
   const assembleAreaContextNode = createAssembleAreaContextNode();
 
@@ -239,7 +241,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
 }
 
 // Main export function - generates tours using LangGraph workflow
-export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, redisClient }) {
+export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, city: providedCity, neighborhood: providedNeighborhood, redisClient }) {
   if (!redisClient) {
     throw new Error('Redis client is required for tour generation');
   }
@@ -259,14 +261,21 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     configurable: { thread_id: sessionId || 'default' },
   };
 
+  // Initialize state with provided city/neighborhood if available
+  const initialState = {
+    messages: [],
+    ...(providedCity && { city: providedCity }),
+    ...(providedNeighborhood && { neighborhood: providedNeighborhood })
+  };
+
   const finalState = await graph.invoke(
-    { messages: [] },
+    initialState,
     config
   );
 
-  // Extract results from final state
-  const city = finalState.areaContext?.city || null;
-  const neighborhood = finalState.areaContext?.neighborhood || null;
+  // Extract results from final state - use provided values if available, otherwise use generated values
+  const city = providedCity || finalState.areaContext?.city || null;
+  const neighborhood = providedNeighborhood || finalState.areaContext?.neighborhood || null;
   const tours = finalState.finalTours || [];
 
   // Fire off cache operations asynchronously (don't await)

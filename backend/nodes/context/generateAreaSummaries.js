@@ -16,13 +16,16 @@ function debugLog(...args) {
 
 /**
  * Create the generateAreaSummaries node
- * 
+ *
  * This node generates summaries and key facts for the city and neighborhood
  * using Gemini LLM. The summaries are generated in parallel for efficiency.
- * 
+ * Checks cache first before generating new summaries.
+ *
+ * @param {Object} config - Node configuration
+ * @param {Object} config.redisClient - Redis client instance for caching
  * @returns {Function} LangGraph node function
  */
-export function createGenerateAreaSummariesNode() {
+export function createGenerateAreaSummariesNode({ redisClient }) {
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
     const city = state.city || null;
@@ -32,10 +35,10 @@ export function createGenerateAreaSummariesNode() {
       console.log('[generateAreaSummaries] Generating area summaries...');
       debugLog('Generating summaries for', { city, neighborhood });
 
-      // Generate city and neighborhood summaries in parallel
+      // Generate city and neighborhood summaries in parallel (with caching)
       const [cityData, neighborhoodData] = await Promise.all([
-        generateCitySummary(city),
-        generateNeighborhoodSummary(neighborhood, city),
+        generateCitySummary(city, redisClient),
+        generateNeighborhoodSummary(neighborhood, city, redisClient),
       ]);
 
       console.log('[generateAreaSummaries] Area summaries generated');
@@ -52,7 +55,7 @@ export function createGenerateAreaSummariesNode() {
       };
     } catch (err) {
       console.error('[generateAreaSummaries] Failed to generate area summaries:', err);
-      
+
       const errorMsg = {
         role: 'assistant',
         content: 'Failed to generate area summaries. Proceeding without summaries.'
