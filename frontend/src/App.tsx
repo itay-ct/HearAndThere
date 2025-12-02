@@ -895,23 +895,30 @@ function App() {
                 {/* Tour Duration */}
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800 mb-3">Tour duration</h2>
-                  <div className="flex items-center gap-3">
+                  <div className="inline-flex items-center rounded-xl border border-slate-200 overflow-hidden">
+                    {/* Decrease button */}
                     <button
                       type="button"
                       onClick={handleDecreaseDuration}
                       disabled={DURATION_OPTIONS.indexOf(durationMinutes) === 0}
-                      className="w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
-                    <div className="flex-1 text-center">
-                      <p className="text-sm font-semibold text-slate-900">{getDurationLabel(durationMinutes)}</p>
+
+                    {/* Fixed width label */}
+                    <div className="w-24 text-center select-none">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {getDurationLabel(durationMinutes)}
+                      </p>
                     </div>
+
+                    {/* Increase button */}
                     <button
                       type="button"
                       onClick={handleIncreaseDuration}
                       disabled={DURATION_OPTIONS.indexOf(durationMinutes) === DURATION_OPTIONS.length - 1}
-                      className="w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
