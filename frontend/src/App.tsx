@@ -918,8 +918,8 @@ function App() {
                   </div>
                 </div>
 
-                {/* Language */}
-                <div>
+                {/* Language - Hidden for now, keeping English as default */}
+                <div style={{ display: 'none' }}>
                   <h2 className="text-sm font-semibold text-slate-800 mb-3">Language</h2>
                   <select
                     value={language}
@@ -987,6 +987,7 @@ function App() {
                   setTours([]);
                   setSelectedTour(null);
                   setSelectedTourId(null);
+                  setMessage(''); // Clear message when going back
                 }}
                 className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
               >
@@ -1071,6 +1072,7 @@ function App() {
               onClick={() => {
                 setSelectedTour(null);
                 setSelectedTourId(null);
+                setMessage(''); // Clear message when going back
               }}
               className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
             >
@@ -1119,8 +1121,8 @@ function App() {
             {/* STEP 4: Voice Selection & Generate Audioguide Button */}
             {!audioguideData && !audioguideGenerating && !audioguideError && (
               <div className="space-y-4">
-                {/* Voice Selection */}
-                <div>
+                {/* Voice Selection - Hidden for now, keeping default voice */}
+                <div style={{ display: 'none' }}>
                   <label htmlFor="voice-select" className="block text-xs font-medium text-slate-700 mb-2">
                     🎙️ Select Voice
                   </label>
