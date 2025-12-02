@@ -280,7 +280,7 @@ function App() {
               // No more fallbacks - show error
               console.error('[Location] All geolocation attempts failed')
               setLocationStatus('error')
-              setMessage('Unable to detect location. Please enter your coordinates manually.')
+              setMessage('Unable to detect location.')
             },
             {
               enableHighAccuracy: false, // Use network-based location
@@ -740,7 +740,7 @@ function App() {
         travelMode: window.google.maps.TravelMode.WALKING,
       }
 
-      directionsService.route(request, (result, status) => {
+      directionsService.route(request, (result: any, status: string) => {
         if (status === 'OK' && result) {
           directionsRenderer.setDirections(result)
           setMessage(`Map loaded for "${selectedTour.title}". Ready to explore!`)
@@ -967,7 +967,7 @@ function App() {
                 🗺️ Generating Tours
               </h3>
               <p className="text-xs text-sky-700 mb-4">
-                Creating personalized walking tours for you. This may take a moment...
+                Creating personalized walking tours for you. This usually takes up to 60 seconds...
               </p>
               <div className="flex items-center gap-3 text-xs">
                 <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
@@ -1189,9 +1189,9 @@ function App() {
         )}
       </div>
       <div className="mt-8 text-center space-y-1">
-        <p className="text-xs text-slate-300 font-light opacity-50 hover:opacity-100 transition-opacity">
+        <p className="text-xs text-slate-300 font-light opacity-80 hover:opacity-100 transition-opacity">
           Reverse geocoding by{" "}
-          <a href="https://locationiq.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">
+          <a href="https://locationiq.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors opacity-50">
             LocationIQ.com
           </a>
         </p>
