@@ -57,6 +57,9 @@ function App() {
   const audioguidePollingRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
+  // Store auto-detected city/neighborhood separately so they can be restored
+  const savedCityRef = useRef<string | null>(null)
+  const savedNeighborhoodRef = useRef<string | null>(null)
 
   // Smooth scroll to bottom utility function
   const scrollToBottom = useCallback(() => {
@@ -191,8 +194,14 @@ function App() {
       const { city: cityName, neighborhood: neighborhoodName } = data
 
       // Update state
-      if (cityName) setCity(cityName)
-      if (neighborhoodName) setNeighborhood(neighborhoodName)
+      if (cityName) {
+        setCity(cityName)
+        savedCityRef.current = cityName
+      }
+      if (neighborhoodName) {
+        setNeighborhood(neighborhoodName)
+        savedNeighborhoodRef.current = neighborhoodName
+      }
 
       // Update display text
       if (neighborhoodName && cityName) {
@@ -310,15 +319,21 @@ function App() {
   const handleLocationButtonPress = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     // Check for Ctrl/Cmd + Click
     if ('ctrlKey' in e && (e.ctrlKey || e.metaKey)) {
+      // Save current city/neighborhood before switching to manual input
+      savedCityRef.current = city
+      savedNeighborhoodRef.current = neighborhood
       setShowLocationInputs(true)
       return
     }
 
     // Start long press timer for touch/mouse
     longPressTimerRef.current = window.setTimeout(() => {
+      // Save current city/neighborhood before switching to manual input
+      savedCityRef.current = city
+      savedNeighborhoodRef.current = neighborhood
       setShowLocationInputs(true)
     }, 500) // 500ms for long press
-  }, [])
+  }, [city, neighborhood])
 
   const handleLocationButtonRelease = useCallback(() => {
     // Clear long press timer
@@ -401,8 +416,9 @@ function App() {
         sessionId: clientSessionId,
         customization: customization.trim() || undefined,
         language,
-        ...(city && { city }),
-        ...(neighborhood && { neighborhood })
+        // Only include city/neighborhood if NOT in manual input mode
+        ...(!showLocationInputs && city && { city }),
+        ...(!showLocationInputs && neighborhood && { neighborhood })
       }
 
       console.log('=== API REQUEST DEBUG ===')
@@ -882,7 +898,12 @@ function App() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShowLocationInputs(false)}
+                      onClick={() => {
+                        setShowLocationInputs(false)
+                        // Restore saved city/neighborhood when going back to auto-detect
+                        setCity(savedCityRef.current)
+                        setNeighborhood(savedNeighborhoodRef.current)
+                      }}
                       className="text-xs text-slate-600 hover:text-slate-900 underline"
                     >
                       Hide manual input

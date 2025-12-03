@@ -115,17 +115,18 @@ export function heuristicToursFromPois({ latitude, longitude, durationMinutes, c
 /**
  * Generate tours using Gemini LLM
  */
-export async function generateToursWithGemini({ 
-  latitude, 
-  longitude, 
-  durationMinutes, 
-  customization, 
-  language, 
-  city, 
-  neighborhood, 
-  pois, 
-  cityData, 
-  neighborhoodData 
+export async function generateToursWithGemini({
+  latitude,
+  longitude,
+  durationMinutes,
+  customization,
+  language,
+  city,
+  neighborhood,
+  pois,
+  cityData,
+  neighborhoodData,
+  foodPois = []
 }) {
   const fallback = () =>
     heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
@@ -183,6 +184,15 @@ export async function generateToursWithGemini({
     rating: poi.rating
   })) : [];
 
+  // Prepare food POI data for LLM (if available)
+  const foodPoisForLLM = Array.isArray(foodPois) ? foodPois.map(poi => ({
+    name: poi.name,
+    latitude: poi.latitude,
+    longitude: poi.longitude,
+    types: poi.types,
+    rating: poi.rating
+  })) : [];
+
   const userPayload = {
     latitude,
     longitude,
@@ -192,19 +202,40 @@ export async function generateToursWithGemini({
     pois: poisForLLM,
     cityData,
     neighborhoodData,
-    customization: customization || null,
     language: language || 'english',
   };
 
-  const input = [
+  // Add customization to payload only if it has a value
+  if (customization && customization.trim().length > 0) {
+    userPayload.customization = customization;
+  }
+
+  // Build input array with conditional food POI instruction
+  const inputParts = [
     systemPrompt,
     '',
     'Here is the JSON input describing the user context:',
     JSON.stringify(userPayload),
     '',
+  ];
+
+  // For tours 2 hours and above, add food POI instruction and foodPois data
+  if (durationMinutes >= 120 && foodPoisForLLM.length > 0) {
+    inputParts.push(
+      'IMPORTANT: Since this is a longer tour (2+ hours), please include at least one good food point of interest from the foodPois list provided below. Choose a highly-rated food establishment that fits naturally into the tour route.',
+      '',
+      'Available food points of interest:',
+      JSON.stringify(foodPoisForLLM),
+      ''
+    );
+  }
+
+  inputParts.push(
     'Respond ONLY with valid JSON of the form:',
-    '{ "tours": [ { "id": "...", "title": "...", "abstract": "...", "theme": "...", "estimatedTotalMinutes": 90, "stops": [ { "name": "...", "latitude": 0, "longitude": 0, "dwellMinutes": 10, "walkMinutesFromPrevious": 5 } ] } ] }',
-  ].join('\n');
+    '{ "tours": [ { "id": "...", "title": "...", "abstract": "...", "theme": "...", "estimatedTotalMinutes": 90, "stops": [ { "name": "...", "latitude": 0, "longitude": 0, "dwellMinutes": 10, "walkMinutesFromPrevious": 5 } ] } ] }'
+  );
+
+  const input = inputParts.join('\n');
 
   debugLog('generateToursWithGemini: invoking model with payload', {
     latitude,

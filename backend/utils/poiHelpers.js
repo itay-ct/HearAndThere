@@ -198,29 +198,33 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
 
   debugLog('searchNearbyPois: calculated radius', radiusMeters, 'meters for duration', durationMinutes, 'minutes');
 
-  // Split primary types into 2 balanced groups to maximize API results (20 per query)
   const primaryTypesGroup1 = [
-    'historical_place', 'historical_landmark', 'monument', 'cultural_landmark',
-    'museum', 'art_gallery', 'sculpture', 'performing_arts_theater',
-    'cultural_center', 'park', 'botanical_garden', 'plaza', 'garden',
-    'visitor_center', 'church', 'hindu_temple', 'mosque', 'synagogue',
-    'observation_deck', 'wildlife_park', 'zoo', 'amusement_center'
+    'historical_place', 'historical_landmark', 'monument', 'cultural_landmark', 'museum',
+    'art_gallery', 'sculpture', 'performing_arts_theater', 'opera_house', 'philharmonic_hall',
+    'concert_hall', 'cultural_center', 'community_center', 'library',
+    'city_hall', 'courthouse', 'embassy', 'church', 'amusement_park',
+    'hindu_temple', 'mosque', 'synagogue', 'market'
   ];
 
   const primaryTypesGroup2 = [
-    'tourist_attraction', 'city_hall', 'courthouse', 'public_bathroom',
-    'cemetery', 'library', 'planetarium', 'opera_house', 'street_art',
-    'landmark', 'bridge', 'aquarium', 'viewpoint', 'architecture_landmark',
-    'marina', 'art_studio', 'local_government_office', 'beach', 'farm', 'ranch'
+    'park', 'national_park', 'state_park', 'botanical_garden', 'garden',
+    'plaza', 'visitor_center', 'beach', 'wildlife_park', 'wildlife_refuge',
+    'zoo', 'aquarium', 'marina', 'hiking_area', 'observation_deck',
+    'athletic_field', 'playground', 'dog_park', 'skateboard_park', 'picnic_ground',
+    'campground', 'rv_park', 'tourist_attraction'
   ];
 
   const secondaryTypes = [
-    'ice_cream_shop', 'coffee_shop', 'adventure_sports_center', 'dog_park',
-    'picnic_ground', 'roller_coaster', 'skateboard_park', 'wildlife_refuge',
-    'acai_shop', 'bagel_shop', 'cat_cafe', 'dog_cafe', 'bakery', 'cafe',
-    'confectionery', 'juice_shop', 'vegan_restaurant', 'wine_bar', 'embassy',
-    'campground', 'playground', 'ski_resort', 'athletic_field',
-    'ice_skating_rink', 'ferry_terminal', 'public_bath', 'restaurant'
+    'restaurant', 'cafe', 'coffee_shop', 'ice_cream_shop', 'bakery',
+    'bar', 'pub', 'wine_bar', 'tea_house', 'fast_food_restaurant',
+    'pizza_restaurant', 'hamburger_restaurant', 'seafood_restaurant', 'steak_house', 'sushi_restaurant',
+    'breakfast_restaurant', 'brunch_restaurant', 'mexican_restaurant', 'indian_restaurant', 'chinese_restaurant',
+    'japanese_restaurant', 'thai_restaurant', 'mediterranean_restaurant', 'middle_eastern_restaurant', 'turkish_restaurant',
+    'greek_restaurant', 'italian_restaurant', 'spanish_restaurant', 'vegan_restaurant', 'vegetarian_restaurant',
+    'bagel_shop', 'donut_shop', 'dessert_shop', 'dessert_restaurant', 'confectionery',
+    'candy_store', 'acai_shop', 'juice_shop', 'cat_cafe', 'dog_cafe',
+    'bar_and_grill', 'food_court', 'fine_dining_restaurant', 'shopping_mall', 'gift_shop',
+    'spa', 'local_government_office', 'auditorium', 'movie_theater'
   ];
 
   const allResults = [];
@@ -395,4 +399,91 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
     return [];
   }
 }, { name: 'queryPoisFromRedis', run_type: 'tool' });
+
+/**
+ * Query food POIs from Redis using RediSearch FT.AGGREGATE
+ * Returns top 15 secondary (primary: false) POIs that include "food" type,
+ * sorted by rating (highest first), within the specified radius.
+ *
+ * Uses FT.AGGREGATE with:
+ * - GEO filter for location
+ * - TAG filter for primary:false
+ * - TAG filter for types containing food-related types
+ * - SORTBY rating descending
+ * - LIMIT 15
+ *
+ * @param {number} latitude - Center latitude
+ * @param {number} longitude - Center longitude
+ * @param {number} radiusMeters - Search radius in meters
+ * @param {Object} redisClient - Redis client instance
+ * @returns {Promise<Array>} Array of food POI objects
+ */
+export const queryFoodPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
+  if (!redisClient) {
+    console.warn('[poiHelpers] No Redis client available for food POI query');
+    return [];
+  }
+
+  // Ensure index exists (safe to call multiple times)
+  await ensurePoiIndexExists(redisClient);
+
+  try {
+    console.log(`[poiHelpers] Querying RediSearch for food POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
+
+    // Build query: GEO filter + primary:false + types containing "food"
+    // Note: Redis Query Engine GEO syntax requires longitude FIRST, then latitude
+    const query = `@location:[${longitude} ${latitude} ${radiusMeters} m] @primary:{false} @types:{food}`;
+
+    debugLog('RediSearch FT.SEARCH food query:', query);
+
+    // Use FT.SEARCH with SORTBY rating descending and LIMIT 15
+    const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
+      SORTBY: {
+        BY: 'rating',
+        DIRECTION: 'DESC'
+      },
+      LIMIT: {
+        from: 0,
+        size: 15
+      }
+    });
+
+    debugLog('RediSearch FT.SEARCH food query returned', results.total, 'results');
+
+    // Parse results from FT.SEARCH
+    const foodPois = [];
+    if (results.documents) {
+      for (const doc of results.documents) {
+        try {
+          const data = doc.value;
+
+          if (data && data.location && data.place_id) {
+            // Parse location string "lon,lat" to extract coordinates
+            const [lon, lat] = data.location.split(',').map(parseFloat);
+
+            foodPois.push({
+              id: data.place_id,
+              name: data.name || 'Unknown Place',
+              latitude: lat,
+              longitude: lon,
+              types: data.types || [],
+              rating: data.rating ? parseFloat(data.rating) : null,
+              primary: data.primary === 'true' || data.primary === true
+            });
+          }
+        } catch (err) {
+          console.warn(`[poiHelpers] Failed to parse food POI result:`, err.message);
+        }
+      }
+    }
+
+    console.log(`[poiHelpers] Returning ${foodPois.length} food POIs for tour generation`);
+    return foodPois;
+
+  } catch (err) {
+    console.error('[poiHelpers] Failed to query food POIs from Redis:', err);
+    console.error('[poiHelpers] Query details:', { latitude, longitude, radiusMeters });
+    return [];
+  }
+}, { name: 'queryFoodPoisFromRedis', run_type: 'tool' });
 

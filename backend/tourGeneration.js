@@ -137,7 +137,8 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     longitude,
     durationMinutes: normalizedDuration,
     customization,
-    language
+    language,
+    redisClient
   });
 
   const validateWalkingTimesNode = createValidateWalkingTimesNode({
