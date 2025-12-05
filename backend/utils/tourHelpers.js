@@ -1,9 +1,11 @@
 /**
  * Tour Helper Functions
- * 
+ *
  * Functions for generating, filtering, and validating walking tours using
  * Gemini LLM and Google Maps Directions API.
  */
+
+import { traceable } from "langsmith/traceable";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -15,16 +17,6 @@ function debugLog(...args) {
   }
 }
 
-function extractJsonFromText(text) {
-  if (!text || typeof text !== 'string') return null;
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    return null;
-  }
-  return text.slice(start, end + 1);
-}
-
 let geminiModelPromise;
 async function getGeminiModel() {
   if (!GEMINI_API_KEY) {
@@ -33,22 +25,86 @@ async function getGeminiModel() {
   }
 
   if (!geminiModelPromise) {
-    geminiModelPromise = import('@langchain/google-genai')
+    geminiModelPromise = import('@google/generative-ai')
       .then((mod) => {
-        const { ChatGoogleGenerativeAI } = mod;
-        return new ChatGoogleGenerativeAI({
-          apiKey: GEMINI_API_KEY,
-          model: GEMINI_MODEL,
-        });
+        const { GoogleGenerativeAI } = mod;
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        return genAI.getGenerativeModel({ model: GEMINI_MODEL });
       })
       .catch((err) => {
-        console.warn('[tourHelpers] Failed to load @langchain/google-genai', err);
+        console.warn('[tourHelpers] Failed to load @google/generative-ai', err);
         return null;
       });
   }
-  
+
   return geminiModelPromise;
 }
+
+// Define JSON schema for tour generation structured output
+const tourGenerationSchema = {
+  type: "object",
+  properties: {
+    tours: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "Unique identifier for the tour"
+          },
+          title: {
+            type: "string",
+            description: "Tour title"
+          },
+          abstract: {
+            type: "string",
+            description: "Brief description of the tour"
+          },
+          theme: {
+            type: "string",
+            description: "Tour theme (e.g., History, Food & Culture, Hidden Gems)"
+          },
+          estimatedTotalMinutes: {
+            type: "number",
+            description: "Total estimated duration in minutes including walking and dwell time"
+          },
+          stops: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  description: "Name of the stop/POI"
+                },
+                latitude: {
+                  type: "number",
+                  description: "Latitude coordinate"
+                },
+                longitude: {
+                  type: "number",
+                  description: "Longitude coordinate"
+                },
+                dwellMinutes: {
+                  type: "number",
+                  description: "Time to spend at this stop in minutes"
+                },
+                walkMinutesFromPrevious: {
+                  type: "number",
+                  description: "Walking time from previous stop in minutes (0 for first stop)"
+                }
+              },
+              required: ["name", "latitude", "longitude", "dwellMinutes", "walkMinutesFromPrevious"]
+            }
+          }
+        },
+        required: ["id", "title", "abstract", "theme", "estimatedTotalMinutes", "stops"]
+      }
+    }
+  },
+  required: ["tours"]
+};
 
 /**
  * Generate heuristic tours from POIs (fallback when LLM is unavailable)
@@ -179,67 +235,88 @@ export async function generateToursWithGemini({
     'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
-  // Prepare POI data without place_id for LLM
-  const poisForLLM = Array.isArray(pois) ? pois.map(poi => ({
-    name: poi.name,
-    latitude: poi.latitude,
-    longitude: poi.longitude,
-    types: poi.types,
-    rating: poi.rating
-  })) : [];
-
-  // Prepare food POI data for LLM (if available)
-  const foodPoisForLLM = Array.isArray(foodPois) ? foodPois.map(poi => ({
-    name: poi.name,
-    latitude: poi.latitude,
-    longitude: poi.longitude,
-    types: poi.types,
-    rating: poi.rating
-  })) : [];
-
-  const userPayload = {
-    latitude,
-    longitude,
-    durationMinutes,
-    city,
-    neighborhood,
-    pois: poisForLLM,
-    cityData,
-    neighborhoodData,
-    language: language || 'english',
+  // Helper function to format POI as simple text
+  const formatPoi = (poi, isFood = false) => {
+    const lat = poi.latitude;
+    const lon = poi.longitude;
+    const types = Array.isArray(poi.types) && poi.types.length > 0 ? poi.types.join(', ') : 'general';
+    const rating = poi.rating ? poi.rating.toFixed(1) : 'N/A';
+    const foodMarker = isFood ? ' [FOOD]' : '';
+    return `- ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
   };
 
-  // Add customization to payload only if it has a value
-  if (customization && customization.trim().length > 0) {
-    userPayload.customization = customization;
+  // Merge regular POIs and food POIs into one list
+  const allPois = [...(Array.isArray(pois) ? pois : [])];
+
+  // For tours 2+ hours, add food POIs with [FOOD] marker
+  const shouldIncludeFood = durationMinutes >= 120 && Array.isArray(foodPois) && foodPois.length > 0;
+  if (shouldIncludeFood) {
+    allPois.push(...foodPois.map(poi => ({ ...poi, _isFood: true })));
   }
 
-  // Build input array with conditional food POI instruction
+  // Format all POIs as simple text list
+  const poisText = allPois.length > 0
+    ? allPois.map(poi => formatPoi(poi, poi._isFood)).join('\n')
+    : 'No POIs available';
+
+  // Format city context
+  let cityContextText = '';
+  if (cityData) {
+    cityContextText = `City: ${city}\n${cityData.summary || ''}`;
+    if (cityData.keyFacts && cityData.keyFacts.length > 0) {
+      cityContextText += '\nKey Facts:\n' + cityData.keyFacts.map(f => `- ${f}`).join('\n');
+    }
+  }
+
+  // Format neighborhood context
+  let neighborhoodContextText = '';
+  if (neighborhoodData) {
+    neighborhoodContextText = `Neighborhood: ${neighborhood}\n${neighborhoodData.summary || ''}`;
+    if (neighborhoodData.keyFacts && neighborhoodData.keyFacts.length > 0) {
+      neighborhoodContextText += '\nKey Facts:\n' + neighborhoodData.keyFacts.map(f => `- ${f}`).join('\n');
+    }
+  }
+
+  // Build input array with simplified format
   const inputParts = [
     systemPrompt,
     '',
-    'Here is the JSON input describing the user context:',
-    JSON.stringify(userPayload),
-    '',
+    '=== TOUR CONTEXT ===',
+    `Starting Location: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+    `Duration: ${durationMinutes} minutes`,
+    `Language: ${language || 'english'}`,
   ];
 
-  // For tours 2 hours and above, add food POI instruction and foodPois data
-  if (durationMinutes >= 120 && foodPoisForLLM.length > 0) {
-    inputParts.push(
-      'IMPORTANT: Since this is a longer tour (2+ hours), please include at least one good food point of interest from the foodPois list provided below. Choose a highly-rated food establishment that fits naturally into the tour route.',
-      '',
-      'Available food points of interest:',
-      JSON.stringify(foodPoisForLLM),
-      ''
-    );
+  if (customization && customization.trim().length > 0) {
+    inputParts.push(`Customization: ${customization}`);
   }
 
-  inputParts.push(
-    'Respond ONLY with valid JSON of the form:',
-    '{ "tours": [ { "id": "...", "title": "...", "abstract": "...", "theme": "...", "estimatedTotalMinutes": 90, "stops": [ { "name": "...", "latitude": 0, "longitude": 0, "dwellMinutes": 10, "walkMinutesFromPrevious": 5 } ] } ] }'
-  );
+  inputParts.push('');
 
-  const input = inputParts.join('\n');
+  if (cityContextText) {
+    inputParts.push('=== CITY CONTEXT ===');
+    inputParts.push(cityContextText);
+    inputParts.push('');
+  }
+
+  if (neighborhoodContextText) {
+    inputParts.push('=== NEIGHBORHOOD CONTEXT ===');
+    inputParts.push(neighborhoodContextText);
+    inputParts.push('');
+  }
+
+  inputParts.push('=== AVAILABLE POINTS OF INTEREST ===');
+  inputParts.push('Format: NAME / LATITUDE / LONGITUDE / TYPES / RATING');
+
+  if (shouldIncludeFood) {
+    inputParts.push('Note: POIs marked with [FOOD] are food establishments. For tours 2+ hours, include at least one highly-rated [FOOD] POI.');
+  }
+
+  inputParts.push('');
+  inputParts.push(poisText);
+  inputParts.push('');
+
+  const prompt = inputParts.join('\n');
 
   debugLog('generateToursWithGemini: invoking model with payload', {
     latitude,
@@ -247,31 +324,53 @@ export async function generateToursWithGemini({
     durationMinutes,
     city,
     neighborhood,
-    poiCount: poisForLLM.length,
+    poiCount: allPois.length,
   });
 
-  try {
-    const response = await model.invoke(input);
-    const text = response.content || '';
+  // Wrap Gemini call with traceable for LangSmith observability
+  const generateToursTraceable = traceable(
+    async (promptText) => {
+      // Use structured output with JSON schema
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: tourGenerationSchema,
+        },
+      });
 
-    debugLog('generateToursWithGemini: raw response text length', text.length);
-    console.log('[tourHelpers] generateToursWithGemini: raw response preview:', text.substring(0, 500));
+      const response = result.response;
+      const text = response.text();
 
-    const jsonText = extractJsonFromText(text);
-    if (!jsonText) {
-      console.warn('[tourHelpers] Gemini response did not contain JSON; falling back to heuristics.');
-      debugLog('generateToursWithGemini: no JSON block found, using fallback');
-      return fallback();
+      debugLog('generateToursWithGemini: structured output response length', text.length);
+      console.log('[tourHelpers] generateToursWithGemini: structured output preview:', text.substring(0, 500));
+
+      return text;
+    },
+    {
+      name: 'generate_tours_with_gemini',
+      run_type: 'llm',
+      metadata: {
+        model: GEMINI_MODEL,
+        latitude,
+        longitude,
+        durationMinutes,
+        city,
+        neighborhood,
+        poiCount: allPois.length,
+        language,
+      },
     }
+  );
 
-    console.log('[tourHelpers] generateToursWithGemini: extracted JSON length:', jsonText.length);
-    console.log('[tourHelpers] generateToursWithGemini: JSON preview:', jsonText.substring(0, 500));
+  try {
+    const text = await generateToursTraceable(prompt);
 
     let parsed;
     try {
-      parsed = JSON.parse(jsonText);
+      parsed = JSON.parse(text);
     } catch (err) {
-      console.warn('[tourHelpers] Failed to parse Gemini JSON; falling back.', err);
+      console.warn('[tourHelpers] Failed to parse structured output JSON; falling back.', err);
       debugLog('generateToursWithGemini: JSON.parse failed', err?.message || err);
       return fallback();
     }
@@ -336,8 +435,6 @@ export function filterAndRankTours(tours, durationMinutes) {
 /**
  * Get walking directions from Google Maps Directions API
  */
-import { traceable } from 'langsmith/traceable';
-
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 async function safeFetch(url, options) {

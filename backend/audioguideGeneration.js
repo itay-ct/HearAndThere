@@ -192,10 +192,62 @@ async function generateWithRetry(prompt, maxRetries = 3) {
 /**
  * Generate script for tour introduction
  */
-async function generateIntroScript({ tour, areaContext, language }) {
+async function generateIntroScript({ tour, locationSummaries, language }) {
   const languageInstruction = language === 'hebrew'
     ? 'Write the ENTIRE script in HEBREW (עברית). Use natural, conversational Hebrew.'
     : 'Write the ENTIRE script in ENGLISH.';
+
+  // Build comprehensive area context from ALL locations in the tour
+  let areaContextText = '';
+
+  if (locationSummaries && Object.keys(locationSummaries).length > 0) {
+    // Group by city to avoid duplication
+    const citiesMap = new Map();
+    const neighborhoodsMap = new Map();
+
+    for (const [locationKey, locationData] of Object.entries(locationSummaries)) {
+      const { country, city, neighborhood, cityData, neighborhoodData } = locationData;
+
+      // Add city data (only once per city)
+      if (city && cityData && !citiesMap.has(city)) {
+        citiesMap.set(city, cityData);
+      }
+
+      // Add neighborhood data (only once per neighborhood)
+      if (neighborhood && neighborhoodData && !neighborhoodsMap.has(neighborhood)) {
+        neighborhoodsMap.set(neighborhood, neighborhoodData);
+      }
+    }
+
+    // Build context text with all cities
+    if (citiesMap.size > 0) {
+      areaContextText += '\nCities on this tour:\n';
+      for (const [cityName, cityData] of citiesMap) {
+        areaContextText += `\n${cityName}:\n${cityData.summary}`;
+        if (cityData.keyFacts && cityData.keyFacts.length > 0) {
+          areaContextText += `\nKey Facts:\n${cityData.keyFacts.map(fact => `- ${fact}`).join('\n')}`;
+        }
+        areaContextText += '\n';
+      }
+    }
+
+    // Build context text with all neighborhoods
+    if (neighborhoodsMap.size > 0) {
+      areaContextText += '\nNeighborhoods on this tour:\n';
+      for (const [neighborhoodName, neighborhoodData] of neighborhoodsMap) {
+        areaContextText += `\n${neighborhoodName}:\n${neighborhoodData.summary}`;
+        if (neighborhoodData.keyFacts && neighborhoodData.keyFacts.length > 0) {
+          areaContextText += `\nKey Facts:\n${neighborhoodData.keyFacts.map(fact => `- ${fact}`).join('\n')}`;
+        }
+        areaContextText += '\n';
+      }
+    }
+  }
+
+  if (!areaContextText || areaContextText.trim() === '') {
+    areaContextText = '\nNo additional context available';
+    console.warn('[generateIntroScript] ⚠️ WARNING: No location summaries available for intro!');
+  }
 
   const prompt = `You are a professional tour guide creating an engaging audio introduction for a walking tour.
 
@@ -203,17 +255,15 @@ Tour Details:
 - Title: ${tour.title}
 - Theme: ${tour.theme}
 - Abstract: ${tour.abstract}
-- Location: ${areaContext.neighborhood || areaContext.city || 'the area'}
 - Number of stops: ${tour.stops.length}
 - Estimated duration: ${tour.estimatedTotalMinutes} minutes
 
-Context about the area:
-${areaContext.cityData?.summary || 'No additional context available'}
+Context about the areas you'll visit:${areaContextText}
 
 Create a warm, engaging 2-3 minute introduction script that:
 1. Welcomes the visitor
 2. Introduces the tour theme and what makes it special
-3. Gives a brief overview of what they'll experience
+3. Gives a brief overview of what they'll experience and the areas they'll explore
 4. Sets an enthusiastic, friendly tone
 5. Mentions the number of stops and approximate duration
 
@@ -234,7 +284,7 @@ Keep it between 300-450 words.`;
 /**
  * Generate script for a specific stop
  */
-async function generateStopScript({ stop, stopIndex, totalStops, tour, areaContext, nextStop, language }) {
+async function generateStopScript({ stop, stopIndex, totalStops, tour, areaContext, nextStop, previousStop, language }) {
   const isFirst = stopIndex === 0;
   const isLast = stopIndex === totalStops - 1;
 
@@ -262,6 +312,31 @@ async function generateStopScript({ stop, stopIndex, totalStops, tour, areaConte
     }
   }
 
+  // Build area context with city and neighborhood summaries and key facts
+  let areaContextText = '';
+
+  if (areaContext.cityData?.summary) {
+    areaContextText += `\nCity Context (${areaContext.city}):\n${areaContext.cityData.summary}`;
+  }
+
+  if (areaContext.cityData?.keyFacts && areaContext.cityData.keyFacts.length > 0) {
+    areaContextText += `\n\nKey Facts about ${areaContext.city}:\n${areaContext.cityData.keyFacts.map(fact => `- ${fact}`).join('\n')}`;
+  }
+
+  if (areaContext.neighborhoodData?.summary) {
+    areaContextText += `\n\nNeighborhood Context (${areaContext.neighborhood}):\n${areaContext.neighborhoodData.summary}`;
+  }
+
+  if (areaContext.neighborhoodData?.keyFacts && areaContext.neighborhoodData.keyFacts.length > 0) {
+    areaContextText += `\n\nKey Facts about ${areaContext.neighborhood}:\n${areaContext.neighborhoodData.keyFacts.map(fact => `- ${fact}`).join('\n')}`;
+  }
+
+  // Debug logging
+  if (!areaContextText || areaContextText.trim() === '') {
+    console.warn(`[generateStopScript] ⚠️ WARNING: Empty area context for stop "${stop.name}"!`);
+    console.warn(`[generateStopScript] areaContext:`, JSON.stringify(areaContext, null, 2));
+  }
+
   const prompt = `You are a professional tour guide creating an engaging audio script for stop ${stopIndex + 1} of ${totalStops} on a walking tour.
 
 Stop Details:
@@ -269,11 +344,10 @@ Stop Details:
 - Location: ${areaContext.neighborhood || areaContext.city || 'the area'}
 - Tour theme: ${tour.theme}
 ${isFirst ? '- This is the FIRST stop' : ''}
+${!isFirst && previousStop ? `- Previous stop: ${previousStop.name}` : ''}
 ${isLast ? '- This is the LAST stop - include closing remarks' : ''}
 
-Context about the area:
-${areaContext.cityData?.summary || ''}
-${areaContext.neighborhoodData?.summary || ''}
+Context about the area:${areaContextText}
 ${walkingContext}
 
 Create an engaging 3-5 minute audio script that:
@@ -443,6 +517,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
       reducer: (x, y) => y ?? x,
       default: () => ({}),
     }),
+    stopLocationMap: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => ({}),
+    }),
     scripts: Annotation({
       reducer: (x, y) => {
         if (!y) return x;
@@ -527,6 +605,7 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
           stopIndex: index,
           stop,
           nextStop: index < stops.length - 1 ? stops[index + 1] : null, // Pass next stop for walking directions
+          previousStop: index > 0 ? stops[index - 1] : null, // Pass previous stop for context
         })
       ),
     ];
@@ -539,13 +618,13 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
 
   // Node: Generate a single script (intro or stop)
   const generateScriptNode = async (state) => {
-    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, language, locationSummaries } = state;
+    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, previousStop, language, locationSummaries, stopLocationMap } = state;
 
     console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex, 'language:', language);
 
     let result;
     if (scriptType === 'intro') {
-      result = await generateIntroScript({ tour: selectedTour, areaContext, language });
+      result = await generateIntroScript({ tour: selectedTour, locationSummaries, language });
       return {
         scripts: {
           intro: {
@@ -560,20 +639,19 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
       // This ensures each stop uses the correct city/neighborhood data without generating new summaries
       let poiAreaContext = areaContext; // Default to tour-level context
 
-      if (stop && locationSummaries) {
-        // Build location key to lookup preloaded summaries
-        const country = stop.country || 'unknown';
-        const city = stop.city || 'unknown';
-        const neighborhood = stop.neighborhood || 'unknown';
-        const locationKey = `${country}:${city}:${neighborhood}`;
+      if (stopLocationMap && locationSummaries && stopLocationMap[stopIndex]) {
+        // Look up the location key for this stop index
+        const locationKey = stopLocationMap[stopIndex];
 
         if (locationSummaries[locationKey]) {
           // Use preloaded summaries from memory
           poiAreaContext = locationSummaries[locationKey];
-          console.log(`[audioguide] Using preloaded context for "${stop.name}": ${poiAreaContext.city || 'unknown'}${poiAreaContext.neighborhood ? ` (${poiAreaContext.neighborhood})` : ''}`);
+          console.log(`[audioguide] Using preloaded context for "${stop.name}" (stop ${stopIndex}): ${poiAreaContext.city || 'unknown'}${poiAreaContext.neighborhood ? ` (${poiAreaContext.neighborhood})` : ''}`);
         } else {
           console.warn(`[audioguide] No preloaded summaries found for "${stop.name}" (${locationKey}), using tour-level context`);
         }
+      } else {
+        console.warn(`[audioguide] No location mapping found for stop ${stopIndex} ("${stop.name}"), using tour-level context`);
       }
 
       result = await generateStopScript({
@@ -583,6 +661,7 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
         tour: selectedTour,
         areaContext: poiAreaContext, // Use POI-specific context
         nextStop,
+        previousStop,
         language,
       });
 

@@ -171,15 +171,28 @@ export const searchPlacesNearby = traceable(async (latitude, longitude, radiusMe
   const places = Array.isArray(data.places) ? data.places : [];
   debugLog('searchPlacesNearby: got places count', places.length);
 
-  return places.map((place, index) => ({
-    id: place.id || `poi_${index + 1}`,
-    name: place.displayName?.text || 'Unknown Place',
-    latitude: place.location?.latitude || latitude,
-    longitude: place.location?.longitude || longitude,
-    types: place.types || [],
-    rating: place.rating || null,
-    primary: isPrimary, // Mark as primary or secondary
-  }));
+  return places.map((place, index) => {
+    const originalTypes = place.types || [];
+
+    // Filter out generic types that don't add value, but only if there are other types
+    let types = originalTypes.filter(t => t !== 'point_of_interest' && t !== 'establishment');
+
+    // If filtering removed all types, keep the original types (better than nothing)
+    if (originalTypes.length > 0 && types.length === 0) {
+      debugLog(`[searchPlacesNearby] Only generic types for "${place.displayName?.text}":`, originalTypes);
+      types = originalTypes; // Keep original types rather than having empty array
+    }
+
+    return {
+      id: place.id || `poi_${index + 1}`,
+      name: place.displayName?.text || 'Unknown Place',
+      latitude: place.location?.latitude || latitude,
+      longitude: place.location?.longitude || longitude,
+      types: types,
+      rating: place.rating || null,
+      primary: isPrimary, // Mark as primary or secondary
+    };
+  });
 }, { name: 'searchPlacesNearby', run_type: 'tool' });
 
 /**
@@ -283,8 +296,8 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
   try {
     console.log(`[poiHelpers] Querying RediSearch for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
 
-    // Helper function to execute RediSearch geospatial query using FT.AGGREGATE
-    // This uses native Redis sorting by distance and limits to 40 results
+    // Helper function to execute RediSearch geospatial query using FT.SEARCH
+    // FT.SEARCH automatically sorts by distance for GEO queries
     const searchPois = async (radius, filterPrimary = false) => {
       // RediSearch GEO query syntax: @location:[lon lat radius unit]
       // Build query with GEO filter + optional primary filter
@@ -294,67 +307,66 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
       }
 
       try {
-        debugLog('RediSearch FT.AGGREGATE query:', query);
+        debugLog('RediSearch FT.SEARCH query:', query);
 
-        // Use FT.AGGREGATE with LOAD, APPLY (GEODISTANCE), SORTBY, and LIMIT
-        // This performs sorting and limiting natively in Redis
-        // Note: When loading $.location, it becomes available as 'location' in the pipeline
-        const results = await redisClient.ft.aggregate(POI_INDEX_NAME, query, {
-          LOAD: ['@place_id', '@name', '@location', '@types', '@rating', '@primary', '@country', '@city', '@neighborhood'],
-          STEPS: [
-            {
-              type: 'APPLY',
-              expression: `geodistance(@location, ${longitude}, ${latitude})`,
-              AS: 'distance'
-            },
-            {
-              type: 'SORTBY',
-              BY: '@distance'
-            },
-            {
-              type: 'LIMIT',
-              from: 0,
-              size: 40
-            }
-          ]
+        // Use FT.SEARCH with SORTBY and LIMIT
+        // GEO queries automatically calculate distance and can sort by it
+        const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
+          LIMIT: { from: 0, size: 40 },
+          // Note: SORTBY is optional for GEO queries as they're sorted by distance by default
         });
 
-        debugLog('RediSearch FT.AGGREGATE returned', results.total, 'results');
+        debugLog('RediSearch FT.SEARCH returned', results.total, 'documents');
 
-        // Parse results from FT.AGGREGATE
+        // Parse results from FT.SEARCH
         const pois = [];
-        if (results.results) {
-          for (const result of results.results) {
+        if (results.documents) {
+          for (const doc of results.documents) {
             try {
-              // FT.AGGREGATE returns results as key-value pairs
-              const getValue = (key) => {
-                const index = result.findIndex(item => item === key);
-                return index !== -1 && index + 1 < result.length ? result[index + 1] : null;
-              };
+              const { value } = doc;
 
-              // Note: Fields are loaded with @ prefix, so they appear without $ in results
-              const locationStr = getValue('location');
-              const placeId = getValue('place_id');
-              const name = getValue('name');
-              const typesStr = getValue('types');
-              const rating = getValue('rating');
-              const primary = getValue('primary');
-              const country = getValue('country');
-              const city = getValue('city');
-              const neighborhood = getValue('neighborhood');
+              if (!value) {
+                console.warn(`[poiHelpers] Document has no value:`, doc);
+                continue;
+              }
+
+              // Extract fields from document
+              const locationStr = value.location;
+              const placeId = value.place_id;
+              const name = value.name;
+              const typesRaw = value.types;
+              const rating = value.rating;
+              const primary = value.primary;
+              const country = value.country;
+              const city = value.city;
+              const neighborhood = value.neighborhood;
 
               if (locationStr && placeId) {
                 // Parse location string "lon,lat" to extract coordinates
                 const [lon, lat] = locationStr.split(',').map(parseFloat);
 
-                // Parse types array (stored as JSON string)
+                // Parse types - FT.SEARCH returns the JSON array directly
                 let types = [];
-                if (typesStr) {
+                if (Array.isArray(typesRaw)) {
+                  types = typesRaw;
+                } else if (typeof typesRaw === 'string') {
+                  // Fallback: try parsing as JSON string
                   try {
-                    types = JSON.parse(typesStr);
+                    types = JSON.parse(typesRaw);
                   } catch (e) {
                     types = [];
                   }
+                }
+
+                const originalTypes = [...types];
+
+                // Filter out generic types that don't add value, but only if there are other types
+                types = types.filter(t => t !== 'point_of_interest' && t !== 'establishment');
+
+                // If filtering removed all types, keep the original types (better than nothing)
+                if (originalTypes.length > 0 && types.length === 0) {
+                  debugLog(`[Redis] Only generic types for "${name}":`, originalTypes);
+                  types = originalTypes; // Keep original types rather than having empty array
                 }
 
                 pois.push({
@@ -364,21 +376,21 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
                   longitude: lon,
                   types: types,
                   rating: rating ? parseFloat(rating) : null,
-                  primary: primary === 'true' || primary === true,
+                  primary: primary === 'true' || primary === true || primary === '1' || primary === 1,
                   country: country || null,
                   city: city || null,
                   neighborhood: neighborhood || null
                 });
               }
             } catch (err) {
-              console.warn(`[poiHelpers] Failed to parse POI result:`, err.message);
+              console.warn(`[poiHelpers] Failed to parse POI document:`, err.message);
             }
           }
         }
 
         return pois;
       } catch (err) {
-        console.error('[poiHelpers] RediSearch FT.AGGREGATE query failed:', err);
+        console.error('[poiHelpers] RediSearch FT.SEARCH query failed:', err);
         console.error('[poiHelpers] Query was:', query);
         return [];
       }

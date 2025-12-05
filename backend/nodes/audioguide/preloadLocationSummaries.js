@@ -53,9 +53,12 @@ export function createPreloadLocationSummariesNode({ redisClient }) {
       // Track unique locations (country:city:neighborhood combinations)
       const locationSet = new Set();
       const locationSummaries = {};
+      const stopLocationMap = {}; // Map stop index to location key
 
       // Step 1: Reverse geocode all POIs and update cache
-      for (const stop of stops) {
+      for (let i = 0; i < stops.length; i++) {
+        const stop = stops[i];
+
         if (!stop.latitude || !stop.longitude) {
           console.warn(`[preloadLocationSummaries] Stop "${stop.name}" missing coordinates, skipping`);
           continue;
@@ -91,6 +94,9 @@ export function createPreloadLocationSummariesNode({ redisClient }) {
         // Track this location
         const locationKey = `${country || 'unknown'}:${city || 'unknown'}:${neighborhood || 'unknown'}`;
         locationSet.add(locationKey);
+
+        // Map this stop index to its location key
+        stopLocationMap[i] = locationKey;
 
         // Store location data for this stop
         if (!locationSummaries[locationKey]) {
@@ -136,16 +142,20 @@ export function createPreloadLocationSummariesNode({ redisClient }) {
       await Promise.all(summaryPromises);
 
       console.log(`[preloadLocationSummaries] ✅ Preloaded summaries for ${locationSet.size} locations`);
+      console.log(`[preloadLocationSummaries] Stop location map:`, JSON.stringify(stopLocationMap, null, 2));
+      console.log(`[preloadLocationSummaries] Location summaries keys:`, Object.keys(locationSummaries));
 
       return {
-        locationSummaries
+        locationSummaries,
+        stopLocationMap  // Map of stop index -> location key for lookup
       };
 
     } catch (err) {
       console.error('[preloadLocationSummaries] Failed to preload location summaries:', err);
       // Return empty summaries on error - script generation will use tour-level context
       return {
-        locationSummaries: {}
+        locationSummaries: {},
+        stopLocationMap: {}
       };
     }
   };

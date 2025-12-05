@@ -34,6 +34,47 @@ async function safeFetch(url, options) {
   return fetch(url, options);
 }
 
+/**
+ * Sleep for a specified number of milliseconds
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry a function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries (default: 4)
+ * @param {number} delayMs - Delay between retries in milliseconds (default: 1000)
+ * @param {Function} shouldRetry - Optional function to determine if error should trigger retry
+ * @returns {Promise} Result of the function
+ */
+async function retryWithDelay(fn, maxRetries = 4, delayMs = 1000, shouldRetry = null) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      // Check if we should retry this error
+      if (shouldRetry && !shouldRetry(error)) {
+        throw error; // Don't retry this error
+      }
+
+      if (attempt < maxRetries) {
+        console.warn(`[geocodingHelpers] Attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs}ms...`, error.message);
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  // All retries exhausted
+  console.error(`[geocodingHelpers] All ${maxRetries} attempts failed`);
+  throw lastError;
+}
+
 function extractJsonFromText(text) {
   if (!text || typeof text !== 'string') return null;
   const start = text.indexOf('{');
@@ -73,6 +114,7 @@ async function getGeminiModel() {
  * Reverse geocode using Google Maps (fallback)
  * Only queries for RANGE_INTERPOLATED location type for better accuracy
  * Returns country_code (e.g., "us") and full country name (e.g., "United States")
+ * Retries up to 4 times with 1-second delay on errors
  */
 async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
   if (!GOOGLE_MAPS_API_KEY) {
@@ -83,50 +125,68 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
 
   const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&location_type=RANGE_INTERPOLATED&key=${GOOGLE_MAPS_API_KEY}`;
   debugLog('reverseGeocodeWithGoogleMaps: requesting', url);
-  const res = await safeFetch(url);
-  if (!res.ok) {
-    console.warn('[geocodingHelpers] Google Maps reverse geocoding failed with status', res.status);
-    debugLog('reverseGeocodeWithGoogleMaps: non-OK response', res.status);
-    return { countryCode: null, countryName: null, city: null, neighborhood: null };
-  }
 
-  const data = await res.json();
-  debugLog('reverseGeocodeWithGoogleMaps: got response result count', Array.isArray(data.results) ? data.results.length : 0);
-  const first = data.results && data.results[0];
-  if (!first || !first.address_components) {
-    return { countryCode: null, countryName: null, city: null, neighborhood: null };
-  }
+  try {
+    // Retry up to 4 times with 1-second delay
+    return await retryWithDelay(
+      async () => {
+        const res = await safeFetch(url);
 
-  let countryCode = null;
-  let countryName = null;
-  let city = null;
-  let neighborhood = null;
-  for (const comp of first.address_components) {
-    if (comp.types.includes('country')) {
-      // Use short_name for country code (e.g., "US") and lowercase it
-      countryCode = comp.short_name ? comp.short_name.toLowerCase() : null;
-      // Use long_name for full country name (e.g., "United States")
-      countryName = comp.long_name || null;
-    }
-    if (comp.types.includes('locality')) {
-      city = comp.long_name;
-    }
-    if (
-      comp.types.includes('sublocality') ||
-      comp.types.includes('sublocality_level_1') ||
-      comp.types.includes('neighborhood')
-    ) {
-      neighborhood = comp.long_name;
-    }
-  }
+        if (!res.ok) {
+          const error = new Error(`Google Maps reverse geocoding failed with status ${res.status}`);
+          error.status = res.status;
+          console.warn('[geocodingHelpers]', error.message);
+          debugLog('reverseGeocodeWithGoogleMaps: non-OK response', res.status);
+          throw error; // Trigger retry
+        }
 
-  return { countryCode, countryName, city, neighborhood };
+        const data = await res.json();
+        debugLog('reverseGeocodeWithGoogleMaps: got response result count', Array.isArray(data.results) ? data.results.length : 0);
+        const first = data.results && data.results[0];
+        if (!first || !first.address_components) {
+          return { countryCode: null, countryName: null, city: null, neighborhood: null };
+        }
+
+        let countryCode = null;
+        let countryName = null;
+        let city = null;
+        let neighborhood = null;
+        for (const comp of first.address_components) {
+          if (comp.types.includes('country')) {
+            // Use short_name for country code (e.g., "US") and lowercase it
+            countryCode = comp.short_name ? comp.short_name.toLowerCase() : null;
+            // Use long_name for full country name (e.g., "United States")
+            countryName = comp.long_name || null;
+          }
+          if (comp.types.includes('locality')) {
+            city = comp.long_name;
+          }
+          if (
+            comp.types.includes('sublocality') ||
+            comp.types.includes('sublocality_level_1') ||
+            comp.types.includes('neighborhood')
+          ) {
+            neighborhood = comp.long_name;
+          }
+        }
+
+        return { countryCode, countryName, city, neighborhood };
+      },
+      4, // maxRetries
+      1000 // 1 second delay
+    );
+  } catch (err) {
+    console.error('[geocodingHelpers] Google Maps reverse geocoding failed after 4 retries:', err.message);
+    debugLog('reverseGeocodeWithGoogleMaps: error', err.message);
+    return { countryCode, countryName: null, city: null, neighborhood: null };
+  }
 }
 
 /**
  * Reverse geocode using LocationIQ
  * Extracts city (from town/city) and neighborhood (from suburb/neighbourhood)
  * Returns country_code (e.g., "us") and full country name (e.g., "United States")
+ * Retries up to 4 times with 1-second delay on 429 (rate limit) errors
  */
 async function reverseGeocodeWithLocationIQ(latitude, longitude) {
   if (!LOCATIONIQ_API_KEY) {
@@ -138,61 +198,82 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
   debugLog('reverseGeocodeWithLocationIQ: requesting', url);
 
   try {
-    const res = await safeFetch(url);
-    if (!res.ok) {
-      console.warn('[geocodingHelpers] LocationIQ reverse geocoding failed with status', res.status);
-      debugLog('reverseGeocodeWithLocationIQ: non-OK response', res.status);
-      return null;
-    }
+    // Retry up to 4 times with 1-second delay for 429 errors
+    return await retryWithDelay(
+      async () => {
+        const res = await safeFetch(url);
 
-    const data = await res.json();
-    debugLog('reverseGeocodeWithLocationIQ: got response', data);
+        // If we get a 429 (rate limit), throw error to trigger retry
+        if (res.status === 429) {
+          const error = new Error(`LocationIQ rate limit (429)`);
+          error.status = 429;
+          throw error;
+        }
 
-    const address = data.address || {};
+        if (!res.ok) {
+          console.warn('[geocodingHelpers] LocationIQ reverse geocoding failed with status', res.status);
+          debugLog('reverseGeocodeWithLocationIQ: non-OK response', res.status);
+          return null;
+        }
 
-    // Extract country_code (e.g., "us") - lowercase for consistency
-    const countryCode = address.country_code ? address.country_code.toLowerCase() : null;
-    // Extract full country name (e.g., "United States")
-    const countryName = address.country || null;
+        const data = await res.json();
+        debugLog('reverseGeocodeWithLocationIQ: got response', data);
 
-    // Extract city - choose the longer value between city and town
-    let cityValue = null;
-    if (address.city && address.town) {
-      cityValue = address.city.length > address.town.length ? address.city : address.town;
-      debugLog(`reverseGeocodeWithLocationIQ: Both city and town present - city="${address.city}" (${address.city.length}), town="${address.town}" (${address.town.length}) → chose "${cityValue}"`);
-    } else {
-      cityValue = address.city || address.town || null;
-    }
+        const address = data.address || {};
 
-    // Extract neighborhood - choose the longer value between suburb and neighbourhood
-    let neighborhoodValue = null;
-    if (address.suburb && address.neighbourhood) {
-      neighborhoodValue = address.suburb.length > address.neighbourhood.length ? address.suburb : address.neighbourhood;
-      debugLog(`reverseGeocodeWithLocationIQ: Both suburb and neighbourhood present - suburb="${address.suburb}" (${address.suburb.length}), neighbourhood="${address.neighbourhood}" (${address.neighbourhood.length}) → chose "${neighborhoodValue}"`);
-    } else {
-      neighborhoodValue = address.suburb || address.neighbourhood || null;
-    }
+        // Extract country_code (e.g., "us") - lowercase for consistency
+        const countryCode = address.country_code ? address.country_code.toLowerCase() : null;
+        // Extract full country name (e.g., "United States")
+        const countryName = address.country || null;
 
-    // Decision logic: if one is empty, drop it
-    let city = null;
-    let neighborhood = null;
+        // Extract city - choose the longer value between city and town
+        let cityValue = null;
+        if (address.city && address.town) {
+          cityValue = address.city.length > address.town.length ? address.city : address.town;
+          debugLog(`reverseGeocodeWithLocationIQ: Both city and town present - city="${address.city}" (${address.city.length}), town="${address.town}" (${address.town.length}) → chose "${cityValue}"`);
+        } else {
+          cityValue = address.city || address.town || null;
+        }
 
-    if (cityValue && neighborhoodValue) {
-      // Both exist - use both
-      city = cityValue;
-      neighborhood = neighborhoodValue;
-    } else if (cityValue) {
-      // Only city exists
-      city = cityValue;
-    } else if (neighborhoodValue) {
-      // Only neighborhood exists - use it as city
-      city = neighborhoodValue;
-    }
+        // Extract neighborhood - choose the longer value between suburb and neighbourhood
+        let neighborhoodValue = null;
+        if (address.suburb && address.neighbourhood) {
+          neighborhoodValue = address.suburb.length > address.neighbourhood.length ? address.suburb : address.neighbourhood;
+          debugLog(`reverseGeocodeWithLocationIQ: Both suburb and neighbourhood present - suburb="${address.suburb}" (${address.suburb.length}), neighbourhood="${address.neighbourhood}" (${address.neighbourhood.length}) → chose "${neighborhoodValue}"`);
+        } else {
+          neighborhoodValue = address.suburb || address.neighbourhood || null;
+        }
 
-    debugLog('reverseGeocodeWithLocationIQ: extracted', { countryCode, countryName, city, neighborhood });
-    return { countryCode, countryName, city, neighborhood };
+        // Decision logic: if one is empty, drop it
+        let city = null;
+        let neighborhood = null;
+
+        if (cityValue && neighborhoodValue) {
+          // Both exist - use both
+          city = cityValue;
+          neighborhood = neighborhoodValue;
+        } else if (cityValue) {
+          // Only city exists
+          city = cityValue;
+        } else if (neighborhoodValue) {
+          // Only neighborhood exists - use it as city
+          city = neighborhoodValue;
+        }
+
+        debugLog('reverseGeocodeWithLocationIQ: extracted', { countryCode, countryName, city, neighborhood });
+        return { countryCode, countryName, city, neighborhood };
+      },
+      4, // maxRetries
+      1000, // 1 second delay
+      (error) => error.status === 429 // Only retry on 429 errors
+    );
   } catch (err) {
-    console.error('[geocodingHelpers] LocationIQ reverse geocoding error:', err);
+    // If all retries failed with 429, or other error occurred
+    if (err.status === 429) {
+      console.error('[geocodingHelpers] LocationIQ rate limit exceeded after 4 retries');
+    } else {
+      console.error('[geocodingHelpers] LocationIQ reverse geocoding error:', err);
+    }
     debugLog('reverseGeocodeWithLocationIQ: error', err.message);
     return null;
   }
@@ -507,13 +588,15 @@ export async function generateCitySummary(city, country = null, redisClient = nu
  */
 export async function generateNeighborhoodSummary(neighborhood, city = null, country = null, redisClient = null) {
   if (!neighborhood) {
-    console.warn('[geocodingHelpers] ⚠️ generateNeighborhoodSummary called without a neighborhood. Returning null.', { neighborhood, city, country });
-    return { summary: null, keyFacts: null };
+    const error = new Error('generateNeighborhoodSummary called without a neighborhood');
+    console.error('[geocodingHelpers] ❌ ERROR:', error.message, { neighborhood, city, country });
+    throw error;
   }
 
   if (!city) {
-    console.warn('[geocodingHelpers] ⚠️ generateNeighborhoodSummary called without a city. This is invalid - neighborhood summaries require a city context. Returning null.', { neighborhood, city, country });
-    return { summary: null, keyFacts: null };
+    const error = new Error('generateNeighborhoodSummary called without a city - neighborhood summaries require a city context');
+    console.error('[geocodingHelpers] ❌ ERROR:', error.message, { neighborhood, city, country });
+    throw error;
   }
 
   // VALIDATION: Country is REQUIRED for cache operations
