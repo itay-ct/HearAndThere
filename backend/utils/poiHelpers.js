@@ -249,7 +249,10 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
   // This allows caching to happen asynchronously without blocking the user request
 
   debugLog('searchNearbyPois: got unique results count', uniqueResults.length);
-  return uniqueResults.slice(0, 20);
+
+  // Return all unique results (up to 60 from 3 API calls)
+  // Don't limit here - let the caller decide how many to use
+  return uniqueResults;
 }, { name: 'searchNearbyPois', run_type: 'tool' });
 
 /**
