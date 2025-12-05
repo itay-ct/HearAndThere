@@ -3,7 +3,7 @@ import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
 import { traceable } from "langsmith/traceable";
 import fetch from 'node-fetch';
 import { GoogleAuth } from 'google-auth-library';
-import { enrichPoiWithLocationContext } from './utils/poiHelpers.js';
+import { createPreloadLocationSummariesNode } from './nodes/audioguide/preloadLocationSummaries.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_AUDIOGUIDE_MODEL = process.env.GEMINI_AUDIOGUIDE_MODEL || 'gemini-3-pro-preview';
@@ -439,6 +439,10 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
       reducer: (x, y) => y ?? x,
       default: () => 'en-GB-Wavenet-B',
     }),
+    locationSummaries: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => ({}),
+    }),
     scripts: Annotation({
       reducer: (x, y) => {
         if (!y) return x;
@@ -497,6 +501,9 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
     };
   };
 
+  // Create the preload location summaries node
+  const preloadLocationSummariesNode = createPreloadLocationSummariesNode({ redisClient });
+
   // Node: Fan-out to generate all scripts in parallel
   const fanOutScriptsNode = async (state) => {
     const { selectedTour, areaContext } = state;
@@ -532,7 +539,7 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
 
   // Node: Generate a single script (intro or stop)
   const generateScriptNode = async (state) => {
-    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, language } = state;
+    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, language, locationSummaries } = state;
 
     console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex, 'language:', language);
 
@@ -549,18 +556,23 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
         },
       };
     } else {
-      // For stop scripts, enrich POI with its specific location context
-      // This ensures each stop uses the correct city/neighborhood data
+      // For stop scripts, use preloaded location summaries from memory
+      // This ensures each stop uses the correct city/neighborhood data without generating new summaries
       let poiAreaContext = areaContext; // Default to tour-level context
 
-      if (stop && stop.latitude && stop.longitude) {
-        console.log(`[audioguide] Enriching POI "${stop.name}" with location context...`);
-        try {
-          poiAreaContext = await enrichPoiWithLocationContext(stop, redisClient);
-          console.log(`[audioguide] Using POI-specific context: ${poiAreaContext.city || 'unknown'}${poiAreaContext.neighborhood ? ` (${poiAreaContext.neighborhood})` : ''}`);
-        } catch (err) {
-          console.warn(`[audioguide] Failed to enrich POI with location context, using tour-level context:`, err.message);
-          poiAreaContext = areaContext;
+      if (stop && locationSummaries) {
+        // Build location key to lookup preloaded summaries
+        const country = stop.country || 'unknown';
+        const city = stop.city || 'unknown';
+        const neighborhood = stop.neighborhood || 'unknown';
+        const locationKey = `${country}:${city}:${neighborhood}`;
+
+        if (locationSummaries[locationKey]) {
+          // Use preloaded summaries from memory
+          poiAreaContext = locationSummaries[locationKey];
+          console.log(`[audioguide] Using preloaded context for "${stop.name}": ${poiAreaContext.city || 'unknown'}${poiAreaContext.neighborhood ? ` (${poiAreaContext.neighborhood})` : ''}`);
+        } else {
+          console.warn(`[audioguide] No preloaded summaries found for "${stop.name}" (${locationKey}), using tour-level context`);
         }
       }
 
@@ -674,12 +686,14 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
   // Build the graph
   const graph = new StateGraph(AudioguideState)
     .addNode('load_tour_data', loadTourDataNode)
+    .addNode('preload_location_summaries', preloadLocationSummariesNode)
     .addNode('fan_out_scripts', fanOutScriptsNode, { ends: ['generate_script'] })
     .addNode('generate_script', generateScriptNode)
     .addNode('fan_out_audio', fanOutAudioNode, { ends: ['synthesize_audio'] })
     .addNode('synthesize_audio', synthesizeAudioNode)
     .addEdge(START, 'load_tour_data')
-    .addEdge('load_tour_data', 'fan_out_scripts')
+    .addEdge('load_tour_data', 'preload_location_summaries')
+    .addEdge('preload_location_summaries', 'fan_out_scripts')
     .addEdge('generate_script', 'fan_out_audio')
     .addEdge('synthesize_audio', END)
     .compile(checkpointer ? { checkpointer } : {});

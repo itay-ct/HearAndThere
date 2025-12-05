@@ -50,6 +50,24 @@ export function createGenerateCandidateToursNode({
       throw new Error('Area context not available in state');
     }
 
+    // VALIDATION: Check if we have POIs to generate tours from
+    const poiCount = areaContext.pois?.length || 0;
+    if (poiCount === 0) {
+      console.warn('[generateCandidateTours] ⚠️ WARNING: No POIs available for tour generation!');
+      console.warn('[generateCandidateTours] Cannot generate tours without points of interest.');
+
+      const errorMsg = {
+        role: 'assistant',
+        content: 'No points of interest detected in this area. Please try again from a different location.'
+      };
+
+      return {
+        messages: [...messages, errorMsg],
+        tours: [],
+        error: 'no_pois_available'
+      };
+    }
+
     try {
       console.log('[generateCandidateTours] Generating candidate tours with Gemini LLM...');
       debugLog('Generating tours for', {
@@ -60,7 +78,7 @@ export function createGenerateCandidateToursNode({
         language,
         city: areaContext.city,
         neighborhood: areaContext.neighborhood,
-        poiCount: areaContext.pois?.length || 0
+        poiCount
       });
 
       // Query food POIs if tour is 2 hours or longer

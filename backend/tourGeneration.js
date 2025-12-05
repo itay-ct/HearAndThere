@@ -3,7 +3,6 @@ import { createTourState } from './utils/tourState.js';
 
 // Import cache nodes
 import { createCheckCacheForTourSuggestionsNode } from './nodes/cache/checkCacheForTourSuggestions.js';
-import { createCheckPoiCacheNode } from './nodes/cache/checkPoiCache.js';
 import { createSaveTourSuggestionsToCache } from './nodes/cache/saveTourSuggestionsToCache.js';
 import { createSavePoiToCacheNode } from './nodes/cache/savePoiToCache.js';
 
@@ -100,13 +99,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     redisClient
   });
 
-  const checkPoiCacheNode = createCheckPoiCacheNode({
-    latitude,
-    longitude,
-    durationMinutes: normalizedDuration,
-    redisClient
-  });
-
   const fetchPoisNode = createFetchPoisFromGoogleMapsNode({
     latitude,
     longitude,
@@ -154,7 +146,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     // Check cache only if no customization
     if (customization && customization.trim().length > 0) {
       console.log('[tourGeneration] Routing: Skip cache check (customization provided)');
-      return 'check_poi_cache';
+      return 'query_pois';
     }
     console.log('[tourGeneration] Routing: Check cache');
     return 'check_cache_for_tour_suggestions';
@@ -165,17 +157,22 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       console.log('[tourGeneration] Routing: Cache hit, skip to end');
       return END;
     }
-    console.log('[tourGeneration] Routing: Cache miss, continue to POI cache check');
-    return 'check_poi_cache';
+    console.log('[tourGeneration] Routing: Cache miss, continue to query POIs');
+    return 'query_pois';
   };
 
-  const routeAfterPoiCacheCheck = (state) => {
-    if (state.poiCacheHit) {
-      console.log('[tourGeneration] Routing: POI cache hit, skip Google Maps fetch');
-      return 'query_pois';
+  const routeAfterQueryPois = (state) => {
+    // Check if we actually got POIs from the query
+    const poiCount = state.pois?.length || 0;
+
+    // If we have no POIs and haven't tried Google Maps yet, fetch from Google Maps
+    if (poiCount === 0 && !state.googleMapsFetched) {
+      console.warn('[tourGeneration] ⚠️ Routing: query_pois returned 0 POIs, falling back to Google Maps');
+      return 'fetch_pois_from_google_maps';
     }
-    console.log('[tourGeneration] Routing: POI cache miss, fetch from Google Maps');
-    return 'fetch_pois_from_google_maps';
+
+    console.log(`[tourGeneration] Routing: query_pois returned ${poiCount} POIs, continuing to reverse_geocode`);
+    return 'reverse_geocode';
   };
 
   // Build and compile graph
@@ -183,7 +180,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   // They will be called asynchronously after the graph completes to avoid blocking the user response
   const graph = new StateGraph(TourState)
     .addNode('check_cache_for_tour_suggestions', checkCacheForTourSuggestionsNode)
-    .addNode('check_poi_cache', checkPoiCacheNode)
     .addNode('fetch_pois_from_google_maps', fetchPoisNode)
     .addNode('query_pois', queryPoisNode)
     .addNode('reverse_geocode', reverseGeocodeNode)
@@ -197,7 +193,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       shouldCheckCache,
       {
         'check_cache_for_tour_suggestions': 'check_cache_for_tour_suggestions',
-        'check_poi_cache': 'check_poi_cache'
+        'query_pois': 'query_pois'
       }
     )
     .addConditionalEdges(
@@ -205,19 +201,18 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
       routeAfterCacheCheck,
       {
         [END]: END,
-        'check_poi_cache': 'check_poi_cache'
-      }
-    )
-    .addConditionalEdges(
-      'check_poi_cache',
-      routeAfterPoiCacheCheck,
-      {
-        'query_pois': 'query_pois',
-        'fetch_pois_from_google_maps': 'fetch_pois_from_google_maps'
+        'query_pois': 'query_pois'
       }
     )
     .addEdge('fetch_pois_from_google_maps', 'query_pois')
-    .addEdge('query_pois', 'reverse_geocode')
+    .addConditionalEdges(
+      'query_pois',
+      routeAfterQueryPois,
+      {
+        'fetch_pois_from_google_maps': 'fetch_pois_from_google_maps',
+        'reverse_geocode': 'reverse_geocode'
+      }
+    )
     .addEdge('reverse_geocode', 'generate_area_summaries')
     .addEdge('generate_area_summaries', 'assemble_area_context')
     .addEdge('assemble_area_context', 'generate_candidate_tours')
@@ -249,7 +244,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
 }
 
 // Main export function - generates tours using LangGraph workflow
-export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, city: providedCity, neighborhood: providedNeighborhood, redisClient }) {
+export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, city: providedCity, neighborhood: providedNeighborhood, country: providedCountry, redisClient }) {
   if (!redisClient) {
     throw new Error('Redis client is required for tour generation');
   }
@@ -269,11 +264,12 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     configurable: { thread_id: sessionId || 'default' },
   };
 
-  // Initialize state with provided city/neighborhood if available
+  // Initialize state with provided city/neighborhood/country if available
   const initialState = {
     messages: [],
     ...(providedCity && { city: providedCity }),
-    ...(providedNeighborhood && { neighborhood: providedNeighborhood })
+    ...(providedNeighborhood && { neighborhood: providedNeighborhood }),
+    ...(providedCountry && { country: providedCountry })
   };
 
   const finalState = await graph.invoke(
@@ -281,9 +277,16 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     config
   );
 
+  // Check if tour generation failed due to no POIs
+  if (finalState.error === 'no_pois_available') {
+    console.warn('[tourGeneration] ⚠️ Tour generation failed: No POIs available');
+    throw new Error('No points of interest detected in this area. Please try again from a different location.');
+  }
+
   // Extract results from final state - use provided values if available, otherwise use generated values
   const city = providedCity || finalState.areaContext?.city || null;
   const neighborhood = providedNeighborhood || finalState.areaContext?.neighborhood || null;
+  const country = providedCountry || finalState.areaContext?.country || null;
   const tours = finalState.finalTours || [];
   const cityData = finalState.cityData || { summary: null, keyFacts: null };
   const neighborhoodData = finalState.neighborhoodData || { summary: null, keyFacts: null };
@@ -305,6 +308,7 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   return {
     city,
     neighborhood,
+    country,
     tours,
     cityData,
     neighborhoodData,

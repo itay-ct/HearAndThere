@@ -136,6 +136,7 @@ async function start() {
       language,
       city: providedCity,
       neighborhood: providedNeighborhood,
+      country: providedCountry,
     } = req.body || {};
 
     if (
@@ -167,6 +168,7 @@ async function start() {
       language,
       city: providedCity || '(not provided)',
       neighborhood: providedNeighborhood || '(not provided)',
+      country: providedCountry || '(not provided)',
     });
 
     try {
@@ -184,6 +186,7 @@ async function start() {
 
       let city = providedCity || null;
       let neighborhood = providedNeighborhood || null;
+      let country = providedCountry || null;
       let tours = [];
       let cityData = null;
       let neighborhoodData = null;
@@ -198,11 +201,13 @@ async function start() {
           language,
           city: providedCity || null,
           neighborhood: providedNeighborhood || null,
+          country: providedCountry || null,
           redisClient,
         });
         // Use provided values if available, otherwise use generated values
         city = providedCity || result.city || null;
         neighborhood = providedNeighborhood || result.neighborhood || null;
+        country = providedCountry || result.country || null;
         tours = Array.isArray(result.tours) ? result.tours : [];
         cityData = result.cityData || null;
         neighborhoodData = result.neighborhoodData || null;
@@ -222,20 +227,31 @@ async function start() {
           sessionId,
           city,
           neighborhood,
+          country,
           tourCount: tours.length,
         });
       } catch (err) {
-        console.error('Error generating tours', err);
+        console.error('[api/session] Error generating tours:', err);
+
+        // Check if this is a "no POIs" error
+        if (err.message && err.message.includes('No points of interest detected')) {
+          console.warn('[api/session] ⚠️ No POIs available for this location');
+          return res.status(400).json({
+            error: 'no_pois_available',
+            message: 'No points of interest detected in this area. Please try again from a different location.'
+          });
+        }
+
+        // For other errors, log but continue (return empty tours)
+        console.error('[api/session] Continuing with empty tours due to error');
       }
 
       res.json({
         sessionId,
         status: tours.length ? 'tours-ready' : 'saved',
         city,
-
-
-
         neighborhood,
+        country,
         tours,
       });
     } catch (err) {

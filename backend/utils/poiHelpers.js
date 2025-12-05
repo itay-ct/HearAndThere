@@ -298,8 +298,9 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
 
         // Use FT.AGGREGATE with LOAD, APPLY (GEODISTANCE), SORTBY, and LIMIT
         // This performs sorting and limiting natively in Redis
+        // Note: When loading $.location, it becomes available as 'location' in the pipeline
         const results = await redisClient.ft.aggregate(POI_INDEX_NAME, query, {
-          LOAD: ['$.place_id', '$.name', '$.location', '$.types', '$.rating', '$.primary', '$.country', '$.city', '$.neighborhood'],
+          LOAD: ['@place_id', '@name', '@location', '@types', '@rating', '@primary', '@country', '@city', '@neighborhood'],
           STEPS: [
             {
               type: 'APPLY',
@@ -331,15 +332,16 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
                 return index !== -1 && index + 1 < result.length ? result[index + 1] : null;
               };
 
-              const locationStr = getValue('$.location');
-              const placeId = getValue('$.place_id');
-              const name = getValue('$.name');
-              const typesStr = getValue('$.types');
-              const rating = getValue('$.rating');
-              const primary = getValue('$.primary');
-              const country = getValue('$.country');
-              const city = getValue('$.city');
-              const neighborhood = getValue('$.neighborhood');
+              // Note: Fields are loaded with @ prefix, so they appear without $ in results
+              const locationStr = getValue('location');
+              const placeId = getValue('place_id');
+              const name = getValue('name');
+              const typesStr = getValue('types');
+              const rating = getValue('rating');
+              const primary = getValue('primary');
+              const country = getValue('country');
+              const city = getValue('city');
+              const neighborhood = getValue('neighborhood');
 
               if (locationStr && placeId) {
                 // Parse location string "lon,lat" to extract coordinates

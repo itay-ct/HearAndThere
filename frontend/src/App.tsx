@@ -39,6 +39,7 @@ function App() {
   const [tours, setTours] = useState<Tour[]>([])
   const [city, setCity] = useState<string | null>(null)
   const [neighborhood, setNeighborhood] = useState<string | null>(null)
+  const [country, setCountry] = useState<string | null>(null)
   const [selectedTourId, setSelectedTourId] = useState<string | null>(null)
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
@@ -57,9 +58,10 @@ function App() {
   const audioguidePollingRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
-  // Store auto-detected city/neighborhood separately so they can be restored
+  // Store auto-detected city/neighborhood/country separately so they can be restored
   const savedCityRef = useRef<string | null>(null)
   const savedNeighborhoodRef = useRef<string | null>(null)
+  const savedCountryRef = useRef<string | null>(null)
 
   // Smooth scroll to bottom utility function
   const scrollToBottom = useCallback(() => {
@@ -173,7 +175,7 @@ function App() {
     Number.isFinite(latitude) &&
     Number.isFinite(longitude)
 
-  // Call reverse geocode API to get city and neighborhood
+  // Call reverse geocode API to get city, neighborhood, and country
   const fetchLocationDetails = useCallback(async (lat: number, lon: number) => {
     try {
       console.log('[Location] Fetching location details for:', { lat, lon })
@@ -191,7 +193,7 @@ function App() {
       const data = await response.json()
       console.log('[Location] Reverse geocode result:', data)
 
-      const { city: cityName, neighborhood: neighborhoodName } = data
+      const { city: cityName, neighborhood: neighborhoodName, country: countryName } = data
 
       // Update state
       if (cityName) {
@@ -202,14 +204,19 @@ function App() {
         setNeighborhood(neighborhoodName)
         savedNeighborhoodRef.current = neighborhoodName
       }
+      if (countryName) {
+        setCountry(countryName)
+        savedCountryRef.current = countryName
+      }
 
-      // Update display text
-      if (neighborhoodName && cityName) {
-        setLocationDisplayText(`${neighborhoodName}, ${cityName}`)
-      } else if (cityName) {
-        setLocationDisplayText(cityName)
-      } else if (neighborhoodName) {
-        setLocationDisplayText(neighborhoodName)
+      // Update display text - show neighborhood / city / country
+      const locationParts: string[] = []
+      if (neighborhoodName) locationParts.push(neighborhoodName)
+      if (cityName) locationParts.push(cityName)
+      if (countryName) locationParts.push(countryName)
+
+      if (locationParts.length > 0) {
+        setLocationDisplayText(locationParts.join(', '))
       }
     } catch (error) {
       console.error('[Location] Failed to fetch location details:', error)
@@ -319,21 +326,23 @@ function App() {
   const handleLocationButtonPress = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     // Check for Ctrl/Cmd + Click
     if ('ctrlKey' in e && (e.ctrlKey || e.metaKey)) {
-      // Save current city/neighborhood before switching to manual input
+      // Save current city/neighborhood/country before switching to manual input
       savedCityRef.current = city
       savedNeighborhoodRef.current = neighborhood
+      savedCountryRef.current = country
       setShowLocationInputs(true)
       return
     }
 
     // Start long press timer for touch/mouse
     longPressTimerRef.current = window.setTimeout(() => {
-      // Save current city/neighborhood before switching to manual input
+      // Save current city/neighborhood/country before switching to manual input
       savedCityRef.current = city
       savedNeighborhoodRef.current = neighborhood
+      savedCountryRef.current = country
       setShowLocationInputs(true)
     }, 500) // 500ms for long press
-  }, [city, neighborhood])
+  }, [city, neighborhood, country])
 
   const handleLocationButtonRelease = useCallback(() => {
     // Clear long press timer
@@ -416,9 +425,11 @@ function App() {
         sessionId: clientSessionId,
         customization: customization.trim() || undefined,
         language,
-        // Only include city/neighborhood if NOT in manual input mode
+        // Only include city/neighborhood/country if NOT in manual input mode
+        // When manual input is shown, these should be null so backend will reverse geocode from scratch
         ...(!showLocationInputs && city && { city }),
-        ...(!showLocationInputs && neighborhood && { neighborhood })
+        ...(!showLocationInputs && neighborhood && { neighborhood }),
+        ...(!showLocationInputs && country && { country })
       }
 
       console.log('=== API REQUEST DEBUG ===')
@@ -900,9 +911,10 @@ function App() {
                       type="button"
                       onClick={() => {
                         setShowLocationInputs(false)
-                        // Restore saved city/neighborhood when going back to auto-detect
+                        // Restore saved city/neighborhood/country when going back to auto-detect
                         setCity(savedCityRef.current)
                         setNeighborhood(savedNeighborhoodRef.current)
+                        setCountry(savedCountryRef.current)
                       }}
                       className="text-xs text-slate-600 hover:text-slate-900 underline"
                     >

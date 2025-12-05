@@ -24,6 +24,7 @@ function debugLog(...args) {
 export function createAssembleAreaContextNode() {
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
+    const country = state.country || null;
     const city = state.city || null;
     const neighborhood = state.neighborhood || null;
     const pois = state.pois || [];
@@ -33,6 +34,7 @@ export function createAssembleAreaContextNode() {
     try {
       console.log('[assembleAreaContext] Assembling area context...');
       debugLog('Assembling context with', {
+        country,
         city,
         neighborhood,
         poiCount: pois.length,
@@ -41,6 +43,7 @@ export function createAssembleAreaContextNode() {
       });
 
       const areaContext = {
+        country: country || null,
         city: city || null,
         neighborhood: neighborhood || null,
         pois: pois,
@@ -76,6 +79,7 @@ export function createAssembleAreaContextNode() {
       return {
         messages: [...messages, errorMsg],
         areaContext: {
+          country: null,
           city: null,
           neighborhood: null,
           pois: [],

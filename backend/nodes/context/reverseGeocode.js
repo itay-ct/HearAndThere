@@ -30,22 +30,23 @@ function debugLog(...args) {
 export function createReverseGeocodeNode({ latitude, longitude, redisClient }) {
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
+    const existingCountry = state.country || null;
     const existingCity = state.city || null;
     const existingNeighborhood = state.neighborhood || null;
 
     // Skip reverse geocoding if city and neighborhood are already provided
     if (existingCity && existingNeighborhood) {
       console.log('[reverseGeocodeNode] City and neighborhood already provided, skipping reverse geocoding');
-      debugLog('Using provided location:', { city: existingCity, neighborhood: existingNeighborhood });
+      debugLog('Using provided location:', { country: existingCountry, city: existingCity, neighborhood: existingNeighborhood });
 
       const msg = {
         role: 'assistant',
-        content: `Using provided location: ${existingNeighborhood}, ${existingCity}`
+        content: `Using provided location: ${existingNeighborhood}, ${existingCity}${existingCountry ? ` (${existingCountry})` : ''}`
       };
 
       return {
         messages: [...messages, msg],
-        country: null,
+        country: existingCountry,  // ✅ FIX: Preserve existing country instead of setting to null
         city: existingCity,
         neighborhood: existingNeighborhood
       };

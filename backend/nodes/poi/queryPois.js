@@ -46,6 +46,12 @@ export function createQueryPoisNode({ latitude, longitude, durationMinutes, redi
       };
     }
 
+    // If we reach here after Google Maps fetch failed, we should have empty POIs in state
+    if (state.pois !== undefined && state.pois.length === 0) {
+      console.warn('[queryPois] ⚠️ WARNING: POIs in state is empty (Google Maps fetch likely failed or returned nothing)');
+      console.warn('[queryPois] Attempting to query Redis cache as fallback...');
+    }
+
     try {
       console.log('[queryPois] Querying POIs from Redis cache...');
       debugLog('Querying POIs for', { latitude, longitude, durationMinutes });
@@ -63,6 +69,12 @@ export function createQueryPoisNode({ latitude, longitude, durationMinutes, redi
 
       console.log(`[queryPois] Retrieved ${pois.length} POIs from Redis cache`);
 
+      // VALIDATION: Warn if Redis query returned no POIs
+      if (pois.length === 0) {
+        console.warn('[queryPois] ⚠️ WARNING: Redis query returned 0 POIs!');
+        console.warn('[queryPois] This will cause tour generation to fail.');
+      }
+
       const msg = {
         role: 'assistant',
         content: `Retrieved ${pois.length} POIs from Redis cache for tour generation.`
@@ -74,7 +86,8 @@ export function createQueryPoisNode({ latitude, longitude, durationMinutes, redi
         poisCount: pois.length
       };
     } catch (err) {
-      console.error('[queryPois] Failed to query POIs from Redis:', err);
+      console.error('[queryPois] ❌ ERROR: Failed to query POIs from Redis:', err);
+      console.error('[queryPois] Error details:', err.message);
 
       const errorMsg = {
         role: 'assistant',

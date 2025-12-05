@@ -44,8 +44,16 @@ export function createTourState(Annotation, MessagesAnnotation) {
       reducer: (x, y) => y ?? x,
       default: () => [],
     }),
-    
+    googleMapsFetched: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => false,
+    }),
+
     // Location data
+    country: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => null,
+    }),
     city: Annotation({
       reducer: (x, y) => y ?? x,
       default: () => null,
@@ -54,7 +62,7 @@ export function createTourState(Annotation, MessagesAnnotation) {
       reducer: (x, y) => y ?? x,
       default: () => null,
     }),
-    
+
     // Area summaries
     cityData: Annotation({
       reducer: (x, y) => y ?? x,
@@ -63,6 +71,12 @@ export function createTourState(Annotation, MessagesAnnotation) {
     neighborhoodData: Annotation({
       reducer: (x, y) => y ?? x,
       default: () => ({ summary: null, keyFacts: null }),
+    }),
+
+    // Error handling
+    error: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => null,
     }),
   });
 }
