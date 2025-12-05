@@ -183,6 +183,8 @@ async function start() {
       let city = providedCity || null;
       let neighborhood = providedNeighborhood || null;
       let tours = [];
+      let cityData = null;
+      let neighborhoodData = null;
 
       try {
         const result = await generateTours({
@@ -200,11 +202,15 @@ async function start() {
         city = providedCity || result.city || null;
         neighborhood = providedNeighborhood || result.neighborhood || null;
         tours = Array.isArray(result.tours) ? result.tours : [];
+        cityData = result.cityData || null;
+        neighborhoodData = result.neighborhoodData || null;
 
         const extraFields = {};
         if (city) extraFields.city = city;
         if (neighborhood) extraFields.neighborhood = neighborhood;
         if (tours.length) extraFields.tours = JSON.stringify(tours);
+        if (cityData) extraFields.cityData = JSON.stringify(cityData);
+        if (neighborhoodData) extraFields.neighborhoodData = JSON.stringify(neighborhoodData);
 
         if (Object.keys(extraFields).length > 0) {
           await redisClient.hSet(key, extraFields);
@@ -313,11 +319,31 @@ async function start() {
       }
 
       // Build area context from session data
+      // Parse cityData and neighborhoodData from JSON if available
+      let cityData = { summary: null, keyFacts: null };
+      let neighborhoodData = { summary: null, keyFacts: null };
+
+      if (sessionData.cityData) {
+        try {
+          cityData = JSON.parse(sessionData.cityData);
+        } catch (err) {
+          console.warn('[api] Failed to parse cityData from session:', err);
+        }
+      }
+
+      if (sessionData.neighborhoodData) {
+        try {
+          neighborhoodData = JSON.parse(sessionData.neighborhoodData);
+        } catch (err) {
+          console.warn('[api] Failed to parse neighborhoodData from session:', err);
+        }
+      }
+
       const areaContext = {
         city: sessionData.city || null,
         neighborhood: sessionData.neighborhood || null,
-        cityData: { summary: null, keyFacts: null },
-        neighborhoodData: { summary: null, keyFacts: null },
+        cityData,
+        neighborhoodData,
       };
 
       // Get language preference from session

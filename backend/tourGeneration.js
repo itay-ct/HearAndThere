@@ -278,6 +278,8 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   const city = providedCity || finalState.areaContext?.city || null;
   const neighborhood = providedNeighborhood || finalState.areaContext?.neighborhood || null;
   const tours = finalState.finalTours || [];
+  const cityData = finalState.cityData || { summary: null, keyFacts: null };
+  const neighborhoodData = finalState.neighborhoodData || { summary: null, keyFacts: null };
 
   // Fire off cache operations asynchronously (don't await)
   // This allows the user to receive their response immediately while caching happens in the background
@@ -297,6 +299,8 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     city,
     neighborhood,
     tours,
+    cityData,
+    neighborhoodData,
   };
 }
 
