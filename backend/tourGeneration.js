@@ -228,8 +228,14 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   if (redisClient && sessionId) {
     try {
       const { RedisSaver } = await import('@langchain/langgraph-checkpoint-redis');
-      checkpointer = new RedisSaver(redisClient);
-      console.log('[tourGeneration] Using Redis checkpointer for session:', sessionId);
+      // Configure checkpointer with 2-hour TTL to prevent Redis bloat
+      checkpointer = new RedisSaver(redisClient, {
+        ttl: {
+          default_ttl: 120, // 2 hours in minutes
+          refresh_on_read: false // Don't refresh TTL on read
+        }
+      });
+      console.log('[tourGeneration] Using Redis checkpointer for session:', sessionId, '(TTL: 2 hours)');
     } catch (err) {
       console.warn('[tourGeneration] Failed to create Redis checkpointer:', err);
     }

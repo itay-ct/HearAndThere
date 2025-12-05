@@ -102,7 +102,6 @@ export async function cachePlaceInRedis(redisClient, place) {
       primary: place.primary !== undefined ? place.primary : true,
       source: 'google_places_api',
       fetched_at: new Date().toISOString(),
-      pinned: existingPlace?.pinned || false,
       notes: existingPlace?.notes || null,
       tags: existingPlace?.tags || [],
       images: existingPlace?.images || []
@@ -119,10 +118,8 @@ export async function cachePlaceInRedis(redisClient, place) {
     // Upsert the place document (RediSearch will auto-index it)
     await redisClient.json.set(placeKey, '$', placeDoc);
 
-    // Set TTL only if not pinned (7 days)
-    if (!placeDoc.pinned) {
-      await redisClient.expire(placeKey, 7 * 24 * 60 * 60); // 7 days
-    }
+    // Set TTL to 7 days
+    await redisClient.expire(placeKey, 7 * 24 * 60 * 60); // 7 days
 
     debugLog('Successfully cached place', place.id);
   } catch (err) {

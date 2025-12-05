@@ -641,10 +641,16 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
     }
   };
 
-  // Create Redis checkpointer
+  // Create Redis checkpointer with 2-hour TTL to prevent Redis bloat
   let checkpointer = null;
   try {
-    checkpointer = new RedisSaver(redisClient);
+    checkpointer = new RedisSaver(redisClient, {
+      ttl: {
+        default_ttl: 120, // 2 hours in minutes
+        refresh_on_read: false // Don't refresh TTL on read
+      }
+    });
+    console.log('[audioguide] Using Redis checkpointer (TTL: 2 hours)');
   } catch (err) {
     console.warn('[audioguide] Redis checkpointer failed to initialize:', err.message);
   }

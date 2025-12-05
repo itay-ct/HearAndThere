@@ -403,10 +403,7 @@ async function start() {
         duration: selectedTour.estimatedTotalMinutes, // For RediSearch NUMERIC query
         language,
         voice: selectedVoice, // Store selected voice
-        // Store starting point coordinates (separate for backward compatibility)
-        startLatitude,
-        startLongitude,
-        // Store starting point as GEO field for RediSearch
+        // Store starting point as GEO field for RediSearch (indexed)
         startLocation: `${startLongitude},${startLatitude}`,
         // Store full tour data with stops and walking directions
         tour: selectedTour,
