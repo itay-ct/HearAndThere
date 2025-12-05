@@ -89,11 +89,13 @@ async function start() {
     console.log('[api/reverse-geocode] Request:', { latitude, longitude });
 
     try {
-      const { city, neighborhood } = await reverseGeocode(latitude, longitude);
+      // Pass redisClient to enable proactive summary caching
+      const { country, city, neighborhood } = await reverseGeocode(latitude, longitude, redisClient);
 
-      console.log('[api/reverse-geocode] Result:', { city, neighborhood });
+      console.log('[api/reverse-geocode] Result:', { country, city, neighborhood });
 
       res.json({
+        country: country || null,
         city: city || null,
         neighborhood: neighborhood || null,
       });

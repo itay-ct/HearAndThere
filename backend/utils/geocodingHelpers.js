@@ -72,12 +72,13 @@ async function getGeminiModel() {
 /**
  * Reverse geocode using Google Maps (fallback)
  * Only queries for RANGE_INTERPOLATED location type for better accuracy
+ * Returns country_code (e.g., "us") and full country name (e.g., "United States")
  */
 async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[geocodingHelpers] GOOGLE_MAPS_API_KEY is not set; skipping Google Maps reverse-geocoding.');
     debugLog('reverseGeocodeWithGoogleMaps: missing GOOGLE_MAPS_API_KEY');
-    return { city: null, neighborhood: null };
+    return { countryCode: null, countryName: null, city: null, neighborhood: null };
   }
 
   const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&location_type=RANGE_INTERPOLATED&key=${GOOGLE_MAPS_API_KEY}`;
@@ -86,19 +87,27 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
   if (!res.ok) {
     console.warn('[geocodingHelpers] Google Maps reverse geocoding failed with status', res.status);
     debugLog('reverseGeocodeWithGoogleMaps: non-OK response', res.status);
-    return { city: null, neighborhood: null };
+    return { countryCode: null, countryName: null, city: null, neighborhood: null };
   }
 
   const data = await res.json();
   debugLog('reverseGeocodeWithGoogleMaps: got response result count', Array.isArray(data.results) ? data.results.length : 0);
   const first = data.results && data.results[0];
   if (!first || !first.address_components) {
-    return { city: null, neighborhood: null };
+    return { countryCode: null, countryName: null, city: null, neighborhood: null };
   }
 
+  let countryCode = null;
+  let countryName = null;
   let city = null;
   let neighborhood = null;
   for (const comp of first.address_components) {
+    if (comp.types.includes('country')) {
+      // Use short_name for country code (e.g., "US") and lowercase it
+      countryCode = comp.short_name ? comp.short_name.toLowerCase() : null;
+      // Use long_name for full country name (e.g., "United States")
+      countryName = comp.long_name || null;
+    }
     if (comp.types.includes('locality')) {
       city = comp.long_name;
     }
@@ -111,12 +120,13 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
     }
   }
 
-  return { city, neighborhood };
+  return { countryCode, countryName, city, neighborhood };
 }
 
 /**
  * Reverse geocode using LocationIQ
  * Extracts city (from town/city) and neighborhood (from suburb/neighbourhood)
+ * Returns country_code (e.g., "us") and full country name (e.g., "United States")
  */
 async function reverseGeocodeWithLocationIQ(latitude, longitude) {
   if (!LOCATIONIQ_API_KEY) {
@@ -139,6 +149,11 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
     debugLog('reverseGeocodeWithLocationIQ: got response', data);
 
     const address = data.address || {};
+
+    // Extract country_code (e.g., "us") - lowercase for consistency
+    const countryCode = address.country_code ? address.country_code.toLowerCase() : null;
+    // Extract full country name (e.g., "United States")
+    const countryName = address.country || null;
 
     // Extract city - choose the longer value between city and town
     let cityValue = null;
@@ -174,8 +189,8 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
       city = neighborhoodValue;
     }
 
-    debugLog('reverseGeocodeWithLocationIQ: extracted', { city, neighborhood });
-    return { city, neighborhood };
+    debugLog('reverseGeocodeWithLocationIQ: extracted', { countryCode, countryName, city, neighborhood });
+    return { countryCode, countryName, city, neighborhood };
   } catch (err) {
     console.error('[geocodingHelpers] LocationIQ reverse geocoding error:', err);
     debugLog('reverseGeocodeWithLocationIQ: error', err.message);
@@ -184,16 +199,33 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
 }
 
 /**
- * Reverse geocode coordinates to get city and neighborhood
+ * Reverse geocode coordinates to get country, city and neighborhood
  * Uses LocationIQ first, falls back to Google Maps if LocationIQ fails
+ *
+ * @param {number} latitude - Latitude
+ * @param {number} longitude - Longitude
+ * @param {Object} redisClient - Optional Redis client for proactive summary caching
+ * @returns {Promise<Object>} Object with { country, city, neighborhood }
  */
-export async function reverseGeocode(latitude, longitude) {
+export async function reverseGeocode(latitude, longitude, redisClient = null) {
   // Try LocationIQ first
   const locationIQResult = await reverseGeocodeWithLocationIQ(latitude, longitude);
 
   if (locationIQResult && (locationIQResult.city || locationIQResult.neighborhood)) {
     console.log('[geocodingHelpers] ✅ LocationIQ reverse geocoding successful:', locationIQResult);
-    return locationIQResult;
+
+    // Proactively cache summaries in the background (don't await)
+    if (redisClient) {
+      prewarmSummaryCache(locationIQResult.countryName, locationIQResult.city, locationIQResult.neighborhood, redisClient)
+        .catch(err => console.warn('[geocodingHelpers] Failed to prewarm summary cache:', err.message));
+    }
+
+    // Return country (full name), city, and neighborhood
+    return {
+      country: locationIQResult.countryName,
+      city: locationIQResult.city,
+      neighborhood: locationIQResult.neighborhood
+    };
   }
 
   // Fallback to Google Maps
@@ -202,27 +234,112 @@ export async function reverseGeocode(latitude, longitude) {
 
   if (googleMapsResult && (googleMapsResult.city || googleMapsResult.neighborhood)) {
     console.log('[geocodingHelpers] ✅ Google Maps reverse geocoding successful:', googleMapsResult);
-    return googleMapsResult;
+
+    // Proactively cache summaries in the background (don't await)
+    if (redisClient) {
+      prewarmSummaryCache(googleMapsResult.countryName, googleMapsResult.city, googleMapsResult.neighborhood, redisClient)
+        .catch(err => console.warn('[geocodingHelpers] Failed to prewarm summary cache:', err.message));
+    }
+
+    // Return country (full name), city, and neighborhood
+    return {
+      country: googleMapsResult.countryName,
+      city: googleMapsResult.city,
+      neighborhood: googleMapsResult.neighborhood
+    };
   }
 
   console.warn('[geocodingHelpers] Both LocationIQ and Google Maps reverse geocoding failed');
-  return { city: null, neighborhood: null };
+  return { country: null, city: null, neighborhood: null };
+}
+
+/**
+ * Proactively fetch and cache summaries in the background
+ * This improves cache hit rate for subsequent tour generation requests
+ * Fires off generation immediately without checking cache first (generation functions handle caching internally)
+ *
+ * @param {string} country - Full country name (e.g., "Israel", "United States")
+ * @param {string} city - City name
+ * @param {string} neighborhood - Neighborhood name
+ * @param {Object} redisClient - Redis client instance
+ */
+async function prewarmSummaryCache(country, city, neighborhood, redisClient) {
+  if (!redisClient) return;
+
+  // VALIDATION: We must have at least a city to prewarm summaries
+  if (!city) {
+    console.warn('[geocodingHelpers] ⚠️ Cannot prewarm summary cache without a city. Skipping.', { country, city, neighborhood });
+    return;
+  }
+
+  console.log('[geocodingHelpers] 🔥 Prewarming summary cache (fire and forget):', { country, city, neighborhood });
+
+  const promises = [];
+
+  // Fire off city summary generation (it will check cache internally)
+  console.log(`[geocodingHelpers] Initiating city summary generation: ${city}${country ? ` (${country})` : ''}`);
+  promises.push(generateCitySummary(city, country, redisClient));
+
+  // Fire off neighborhood summary generation if we have a neighborhood (it will check cache internally)
+  if (neighborhood) {
+    console.log(`[geocodingHelpers] Initiating neighborhood summary generation: ${neighborhood}, ${city}${country ? ` (${country})` : ''}`);
+    promises.push(generateNeighborhoodSummary(neighborhood, city, country, redisClient));
+  }
+
+  // Execute all fetches in parallel (don't await - fire and forget)
+  Promise.all(promises)
+    .then(() => console.log('[geocodingHelpers] ✅ Summary cache prewarming complete'))
+    .catch(err => console.warn('[geocodingHelpers] Failed to prewarm some summaries:', err.message));
 }
 
 /**
  * Write summary to Redis cache
+ * Uses hierarchical key structure: summary_cache:country:city:neighborhood
+ * Example: summary_cache:Israel:Raanana:Kiryat Sharett
+ *
  * @param {Object} redisClient - Redis client instance
- * @param {string} entityType - Type of entity ('city' or 'neighborhood')
- * @param {string} entityName - Name of the entity
+ * @param {string} country - Full country name (e.g., "Israel", "United States")
+ * @param {string} city - City name (optional)
+ * @param {string} neighborhood - Neighborhood name (optional)
  * @param {Object} summary - Summary object with { summary, keyFacts }
  */
-export async function writeSummaryToCache(redisClient, entityType, entityName, summary) {
-  if (!redisClient || !entityType || !entityName || !summary) {
+export async function writeSummaryToCache(redisClient, country, city, neighborhood, summary) {
+  if (!redisClient || !summary) {
     debugLog('writeSummaryToCache: missing required parameters');
     return;
   }
 
-  const cacheKey = `summary_cache:${entityType}:${entityName}`;
+  // VALIDATION: Country is REQUIRED for all cache operations
+  if (!country) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot write summary to cache without a country!', { country, city, neighborhood });
+    return;
+  }
+
+  // VALIDATION: For city summaries (no neighborhood), we must have a city
+  // For neighborhood summaries, we must have both city and neighborhood
+  if (!neighborhood && !city) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot write city summary to cache without a city!', { country, city, neighborhood });
+    return;
+  }
+  if (neighborhood && !city) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot write neighborhood summary to cache without a city!', { country, city, neighborhood });
+    return;
+  }
+
+  console.log('[geocodingHelpers] writeSummaryToCache called with:', { country, city, neighborhood });
+
+  // Build hierarchical cache key: country:city:neighborhood
+  // Country is ALWAYS included as the first component
+  const parts = ['summary_cache', country];
+
+  // Add city if provided
+  if (city) parts.push(city);
+
+  // Add neighborhood if provided
+  if (neighborhood) parts.push(neighborhood);
+
+  const cacheKey = parts.join(':');
+  console.log('[geocodingHelpers] Writing to cache key:', cacheKey);
 
   try {
     // Use Redis JSON.SET to store the summary as JSON
@@ -231,38 +348,72 @@ export async function writeSummaryToCache(redisClient, entityType, entityName, s
     // Set TTL separately (30 days)
     await redisClient.expire(cacheKey, 30 * 24 * 60 * 60);
 
-    debugLog(`writeSummaryToCache: cached ${entityType} summary for ${entityName}`);
+    console.log(`[geocodingHelpers] ✅ Cached summary at ${cacheKey}`);
   } catch (err) {
-    console.error(`[geocodingHelpers] Failed to cache ${entityType} summary for ${entityName}:`, err);
+    console.error(`[geocodingHelpers] Failed to cache summary at ${cacheKey}:`, err);
   }
 }
 
 /**
  * Read summary from Redis cache
+ * Uses hierarchical key structure: summary_cache:country:city:neighborhood
+ * Example: summary_cache:Israel:Raanana:Kiryat Sharett
+ *
  * @param {Object} redisClient - Redis client instance
- * @param {string} entityType - Type of entity ('city' or 'neighborhood')
- * @param {string} entityName - Name of the entity
+ * @param {string} country - Full country name (e.g., "Israel", "United States")
+ * @param {string} city - City name (optional)
+ * @param {string} neighborhood - Neighborhood name (optional)
  * @returns {Object|null} Summary object with { summary, keyFacts } or null if not found
  */
-export async function readSummaryFromCache(redisClient, entityType, entityName) {
-  if (!redisClient || !entityType || !entityName) {
-    debugLog('readSummaryFromCache: missing required parameters');
+export function readSummaryFromCache(redisClient, country, city, neighborhood) {
+  if (!redisClient) {
+    debugLog('readSummaryFromCache: missing redisClient');
     return null;
   }
 
-  const cacheKey = `summary_cache:${entityType}:${entityName}`;
+  // VALIDATION: Country is REQUIRED for all cache operations
+  if (!country) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot read summary from cache without a country!', { country, city, neighborhood });
+    return null;
+  }
+
+  // VALIDATION: For city summaries (no neighborhood), we must have a city
+  // For neighborhood summaries, we must have both city and neighborhood
+  if (!neighborhood && !city) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot read city summary from cache without a city!', { country, city, neighborhood });
+    return null;
+  }
+  if (neighborhood && !city) {
+    console.error('[geocodingHelpers] ❌ ERROR: Cannot read neighborhood summary from cache without a city!', { country, city, neighborhood });
+    return null;
+  }
+
+  console.log('[geocodingHelpers] readSummaryFromCache called with:', { country, city, neighborhood });
+
+  // Build hierarchical cache key: country:city:neighborhood
+  // Country is ALWAYS included as the first component
+  const parts = ['summary_cache', country];
+
+  // Add city if provided
+  if (city) parts.push(city);
+
+  // Add neighborhood if provided
+  if (neighborhood) parts.push(neighborhood);
+
+  const cacheKey = parts.join(':');
+  console.log('[geocodingHelpers] Reading from cache key:', cacheKey);
 
   try {
     // Use Redis JSON.GET to retrieve the summary as JSON
-    const cached = await redisClient.json.get(cacheKey);
+    const cached = redisClient.json.get(cacheKey);
     if (cached) {
-      debugLog(`readSummaryFromCache: cache hit for ${entityType} ${entityName}`);
+      console.log(`[geocodingHelpers] ✅ Cache hit at ${cacheKey}`);
       return cached;
     }
-    debugLog(`readSummaryFromCache: cache miss for ${entityType} ${entityName}`);
+    console.log(`[geocodingHelpers] ❌ Cache miss at ${cacheKey}`);
     return null;
   } catch (err) {
-    console.error(`[geocodingHelpers] Failed to read ${entityType} summary from cache for ${entityName}:`, err);
+    console.error(`[geocodingHelpers] Failed to read summary from cache at ${cacheKey}:`, err);
     return null;
   }
 }
@@ -270,15 +421,29 @@ export async function readSummaryFromCache(redisClient, entityType, entityName) 
 /**
  * Generate city summary using Gemini LLM
  * Checks cache first, only generates if not cached
+ *
+ * @param {string} city - City name
+ * @param {string} country - Full country name (e.g., "Israel", "United States") - optional
+ * @param {Object} redisClient - Redis client instance
+ * @returns {Promise<Object>} Summary object with { summary, keyFacts }
  */
-export async function generateCitySummary(city, redisClient = null) {
-  if (!city) return { summary: null, keyFacts: null };
+export async function generateCitySummary(city, country = null, redisClient = null) {
+  if (!city) {
+    console.warn('[geocodingHelpers] ⚠️ generateCitySummary called without a city. Returning null.', { city, country });
+    return { summary: null, keyFacts: null };
+  }
 
-  // Check cache first
-  if (redisClient) {
-    const cached = await readSummaryFromCache(redisClient, 'city', city);
+  // VALIDATION: Country is REQUIRED for cache operations
+  if (!country) {
+    console.warn('[geocodingHelpers] ⚠️ generateCitySummary called without a country. Cannot use cache. Generating without caching.', { city, country });
+    // Continue without caching - we'll generate the summary but won't cache it
+  }
+
+  // Check cache first using hierarchical key: country:city (only if we have country)
+  if (redisClient && country) {
+    const cached = await readSummaryFromCache(redisClient, country, city, null);
     if (cached) {
-      console.log(`[geocodingHelpers] Using cached city summary for ${city}`);
+      console.log(`[geocodingHelpers] Using cached city summary for ${city}, ${country}`);
       return cached;
     }
   }
@@ -292,7 +457,12 @@ export async function generateCitySummary(city, redisClient = null) {
   const model = await getGeminiModel();
   if (!model) return { summary: null, keyFacts: null };
 
-  const prompt = `Generate a brief summary and key facts about ${city}. Respond as JSON:
+  // Build city description with country for better LLM context
+  console.log('[geocodingHelpers] generateCitySummary - country:', country, 'city:', city);
+  const cityDescription = country ? `${city}, ${country}` : city;
+  console.log('[geocodingHelpers] City description for LLM:', cityDescription);
+
+  const prompt = `Generate a brief summary and key facts about ${cityDescription}. Respond as JSON:
 {
   "summary": "2-3 sentence overview of the city",
   "keyFacts": ["fact 1", "fact 2", "fact 3", "fact 4", "fact 5"]
@@ -309,9 +479,11 @@ export async function generateCitySummary(city, redisClient = null) {
         keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
       };
 
-      // Cache the result
-      if (redisClient && (result.summary || result.keyFacts)) {
-        await writeSummaryToCache(redisClient, 'city', city, result);
+      // Cache the result using hierarchical key: country:city (only if we have country)
+      if (redisClient && country && (result.summary || result.keyFacts)) {
+        await writeSummaryToCache(redisClient, country, city, null, result);
+      } else if (redisClient && !country) {
+        console.warn('[geocodingHelpers] ⚠️ Cannot cache city summary without country. Summary generated but not cached.');
       }
 
       return result;
@@ -326,17 +498,35 @@ export async function generateCitySummary(city, redisClient = null) {
 /**
  * Generate neighborhood summary using Gemini LLM
  * Checks cache first, only generates if not cached
+ *
+ * @param {string} neighborhood - Neighborhood name
+ * @param {string} city - City name (optional)
+ * @param {string} country - Full country name (e.g., "Israel", "United States") - optional
+ * @param {Object} redisClient - Redis client instance
+ * @returns {Promise<Object>} Summary object with { summary, keyFacts }
  */
-export async function generateNeighborhoodSummary(neighborhood, city, redisClient = null) {
-  if (!neighborhood) return { summary: null, keyFacts: null };
+export async function generateNeighborhoodSummary(neighborhood, city = null, country = null, redisClient = null) {
+  if (!neighborhood) {
+    console.warn('[geocodingHelpers] ⚠️ generateNeighborhoodSummary called without a neighborhood. Returning null.', { neighborhood, city, country });
+    return { summary: null, keyFacts: null };
+  }
 
-  // Check cache first (use city:neighborhood as cache key to avoid conflicts)
-  // Different cities can have neighborhoods with the same name
-  const cacheKey = city ? `${city}:${neighborhood}` : neighborhood;
-  if (redisClient) {
-    const cached = await readSummaryFromCache(redisClient, 'neighborhood', cacheKey);
+  if (!city) {
+    console.warn('[geocodingHelpers] ⚠️ generateNeighborhoodSummary called without a city. This is invalid - neighborhood summaries require a city context. Returning null.', { neighborhood, city, country });
+    return { summary: null, keyFacts: null };
+  }
+
+  // VALIDATION: Country is REQUIRED for cache operations
+  if (!country) {
+    console.warn('[geocodingHelpers] ⚠️ generateNeighborhoodSummary called without a country. Cannot use cache. Generating without caching.', { neighborhood, city, country });
+    // Continue without caching - we'll generate the summary but won't cache it
+  }
+
+  // Check cache first using hierarchical key: country:city:neighborhood (only if we have country)
+  if (redisClient && country) {
+    const cached = await readSummaryFromCache(redisClient, country, city, neighborhood);
     if (cached) {
-      console.log(`[geocodingHelpers] Using cached neighborhood summary for ${neighborhood}${city ? ` in ${city}` : ''}`);
+      console.log(`[geocodingHelpers] Using cached neighborhood summary for ${neighborhood}, ${city}, ${country}`);
       return cached;
     }
   }
@@ -350,7 +540,14 @@ export async function generateNeighborhoodSummary(neighborhood, city, redisClien
   const model = await getGeminiModel();
   if (!model) return { summary: null, keyFacts: null };
 
-  const location = city ? `${neighborhood}, ${city}` : neighborhood;
+  // Build location description with available parts, including country for better LLM context
+  console.log('[geocodingHelpers] generateNeighborhoodSummary - country:', country, 'city:', city, 'neighborhood:', neighborhood);
+  const locationParts = [neighborhood];
+  if (city) locationParts.push(city);
+  if (country) locationParts.push(country);
+  const location = locationParts.join(', ');
+  console.log('[geocodingHelpers] Neighborhood description for LLM:', location);
+
   const prompt = `Generate a brief summary and key facts about ${location}. Respond as JSON:
 {
   "summary": "2-3 sentence overview of the neighborhood",
@@ -368,9 +565,11 @@ export async function generateNeighborhoodSummary(neighborhood, city, redisClien
         keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
       };
 
-      // Cache the result with city:neighborhood key
-      if (redisClient && (result.summary || result.keyFacts)) {
-        await writeSummaryToCache(redisClient, 'neighborhood', cacheKey, result);
+      // Cache the result using hierarchical key: country:city:neighborhood (only if we have country)
+      if (redisClient && country && (result.summary || result.keyFacts)) {
+        await writeSummaryToCache(redisClient, country, city, neighborhood, result);
+      } else if (redisClient && !country) {
+        console.warn('[geocodingHelpers] ⚠️ Cannot cache neighborhood summary without country. Summary generated but not cached.');
       }
 
       return result;

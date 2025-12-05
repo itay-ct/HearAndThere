@@ -28,24 +28,26 @@ function debugLog(...args) {
 export function createGenerateAreaSummariesNode({ redisClient }) {
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
+    const country = state.country || null;
     const city = state.city || null;
     const neighborhood = state.neighborhood || null;
 
     try {
       console.log('[generateAreaSummaries] Generating area summaries...');
-      debugLog('Generating summaries for', { city, neighborhood });
+      debugLog('Generating summaries for', { country, city, neighborhood });
 
       // Generate city and neighborhood summaries in parallel (with caching)
+      // Use hierarchical cache keys: country:city and country:city:neighborhood
       const [cityData, neighborhoodData] = await Promise.all([
-        generateCitySummary(city, redisClient),
-        generateNeighborhoodSummary(neighborhood, city, redisClient),
+        generateCitySummary(city, country, redisClient),
+        generateNeighborhoodSummary(neighborhood, city, country, redisClient),
       ]);
 
       console.log('[generateAreaSummaries] Area summaries generated');
 
       const msg = {
         role: 'assistant',
-        content: `Generated summaries for ${city || 'area'}${neighborhood ? ` (${neighborhood})` : ''}`
+        content: `Generated summaries for ${city || 'area'}${neighborhood ? ` (${neighborhood})` : ''}${country ? ` (${country})` : ''}`
       };
 
       return {

@@ -3,6 +3,7 @@ import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
 import { traceable } from "langsmith/traceable";
 import fetch from 'node-fetch';
 import { GoogleAuth } from 'google-auth-library';
+import { enrichPoiWithLocationContext } from './utils/poiHelpers.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_AUDIOGUIDE_MODEL = process.env.GEMINI_AUDIOGUIDE_MODEL || 'gemini-3-pro-preview';
@@ -540,30 +541,45 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
       result = await generateIntroScript({ tour: selectedTour, areaContext, language });
       return {
         scripts: {
-          intro: { 
-            status: 'complete', 
+          intro: {
+            status: 'complete',
             content: result.script,
-            modelUsed: result.modelUsed 
+            modelUsed: result.modelUsed
           },
         },
       };
     } else {
+      // For stop scripts, enrich POI with its specific location context
+      // This ensures each stop uses the correct city/neighborhood data
+      let poiAreaContext = areaContext; // Default to tour-level context
+
+      if (stop && stop.latitude && stop.longitude) {
+        console.log(`[audioguide] Enriching POI "${stop.name}" with location context...`);
+        try {
+          poiAreaContext = await enrichPoiWithLocationContext(stop, redisClient);
+          console.log(`[audioguide] Using POI-specific context: ${poiAreaContext.city || 'unknown'}${poiAreaContext.neighborhood ? ` (${poiAreaContext.neighborhood})` : ''}`);
+        } catch (err) {
+          console.warn(`[audioguide] Failed to enrich POI with location context, using tour-level context:`, err.message);
+          poiAreaContext = areaContext;
+        }
+      }
+
       result = await generateStopScript({
         stop,
         stopIndex,
         totalStops: selectedTour.stops.length,
         tour: selectedTour,
-        areaContext,
+        areaContext: poiAreaContext, // Use POI-specific context
         nextStop,
         language,
       });
 
       // Update the specific stop script
       const updatedStops = [...(state.scripts?.stops || [])];
-      updatedStops[stopIndex] = { 
-        status: 'complete', 
+      updatedStops[stopIndex] = {
+        status: 'complete',
         content: result.script,
-        modelUsed: result.modelUsed 
+        modelUsed: result.modelUsed
       };
 
       return {

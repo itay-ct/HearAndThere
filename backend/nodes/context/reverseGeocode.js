@@ -24,9 +24,10 @@ function debugLog(...args) {
  * @param {Object} config - Node configuration
  * @param {number} config.latitude - Starting latitude
  * @param {number} config.longitude - Starting longitude
+ * @param {Object} config.redisClient - Redis client for proactive summary caching
  * @returns {Function} LangGraph node function
  */
-export function createReverseGeocodeNode({ latitude, longitude }) {
+export function createReverseGeocodeNode({ latitude, longitude, redisClient }) {
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
     const existingCity = state.city || null;
@@ -44,6 +45,7 @@ export function createReverseGeocodeNode({ latitude, longitude }) {
 
       return {
         messages: [...messages, msg],
+        country: null,
         city: existingCity,
         neighborhood: existingNeighborhood
       };
@@ -53,22 +55,24 @@ export function createReverseGeocodeNode({ latitude, longitude }) {
       console.log('[reverseGeocodeNode] Performing reverse geocoding...');
       debugLog('Reverse geocoding for', { latitude, longitude });
 
-      // Perform reverse geocoding
-      const { city, neighborhood } = await reverseGeocode(latitude, longitude);
+      // Perform reverse geocoding (with proactive summary caching)
+      const { country, city, neighborhood } = await reverseGeocode(latitude, longitude, redisClient);
 
       // Use provided values if available, otherwise use geocoded values
+      const finalCountry = country;
       const finalCity = existingCity || city;
       const finalNeighborhood = existingNeighborhood || neighborhood;
 
-      console.log('[reverseGeocodeNode] Reverse geocoding complete:', { city: finalCity, neighborhood: finalNeighborhood });
+      console.log('[reverseGeocodeNode] Reverse geocoding complete:', { country: finalCountry, city: finalCity, neighborhood: finalNeighborhood });
 
       const msg = {
         role: 'assistant',
-        content: `Identified location: ${finalNeighborhood ? `${finalNeighborhood}, ` : ''}${finalCity || 'Unknown'}`
+        content: `Identified location: ${finalNeighborhood ? `${finalNeighborhood}, ` : ''}${finalCity || 'Unknown'}${finalCountry ? ` (${finalCountry})` : ''}`
       };
 
       return {
         messages: [...messages, msg],
+        country: finalCountry,
         city: finalCity,
         neighborhood: finalNeighborhood
       };
@@ -82,6 +86,7 @@ export function createReverseGeocodeNode({ latitude, longitude }) {
 
       return {
         messages: [...messages, errorMsg],
+        country: null,
         city: existingCity,
         neighborhood: existingNeighborhood
       };

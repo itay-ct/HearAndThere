@@ -123,7 +123,8 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
 
   const reverseGeocodeNode = createReverseGeocodeNode({
     latitude,
-    longitude
+    longitude,
+    redisClient
   });
 
   const generateAreaSummariesNode = createGenerateAreaSummariesNode({

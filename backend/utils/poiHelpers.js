@@ -1,11 +1,12 @@
 /**
  * POI Helper Functions
- * 
+ *
  * Functions for fetching, caching, and querying Points of Interest (POIs)
  * from Google Maps API and Redis cache.
  */
 
 import { traceable } from 'langsmith/traceable';
+import { reverseGeocode, generateCitySummary, generateNeighborhoodSummary } from './geocodingHelpers.js';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const POI_INDEX_NAME = 'idx:pois';
@@ -104,7 +105,11 @@ export async function cachePlaceInRedis(redisClient, place) {
       fetched_at: new Date().toISOString(),
       notes: existingPlace?.notes || null,
       tags: existingPlace?.tags || [],
-      images: existingPlace?.images || []
+      images: existingPlace?.images || [],
+      // Location context fields (populated on-demand during audioguide generation)
+      country: place.country || existingPlace?.country || null,
+      city: place.city || existingPlace?.city || null,
+      neighborhood: place.neighborhood || existingPlace?.neighborhood || null
     };
 
     debugLog('Caching place:', {
@@ -294,7 +299,7 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
         // Use FT.AGGREGATE with LOAD, APPLY (GEODISTANCE), SORTBY, and LIMIT
         // This performs sorting and limiting natively in Redis
         const results = await redisClient.ft.aggregate(POI_INDEX_NAME, query, {
-          LOAD: ['$.place_id', '$.name', '$.location', '$.types', '$.rating', '$.primary'],
+          LOAD: ['$.place_id', '$.name', '$.location', '$.types', '$.rating', '$.primary', '$.country', '$.city', '$.neighborhood'],
           STEPS: [
             {
               type: 'APPLY',
@@ -332,6 +337,9 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
               const typesStr = getValue('$.types');
               const rating = getValue('$.rating');
               const primary = getValue('$.primary');
+              const country = getValue('$.country');
+              const city = getValue('$.city');
+              const neighborhood = getValue('$.neighborhood');
 
               if (locationStr && placeId) {
                 // Parse location string "lon,lat" to extract coordinates
@@ -354,7 +362,10 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
                   longitude: lon,
                   types: types,
                   rating: rating ? parseFloat(rating) : null,
-                  primary: primary === 'true' || primary === true
+                  primary: primary === 'true' || primary === true,
+                  country: country || null,
+                  city: city || null,
+                  neighborhood: neighborhood || null
                 });
               }
             } catch (err) {
@@ -468,7 +479,10 @@ export const queryFoodPoisFromRedis = traceable(async (latitude, longitude, radi
               longitude: lon,
               types: data.types || [],
               rating: data.rating ? parseFloat(data.rating) : null,
-              primary: data.primary === 'true' || data.primary === true
+              primary: data.primary === 'true' || data.primary === true,
+              country: data.country || null,
+              city: data.city || null,
+              neighborhood: data.neighborhood || null
             });
           }
         } catch (err) {
@@ -486,4 +500,89 @@ export const queryFoodPoisFromRedis = traceable(async (latitude, longitude, radi
     return [];
   }
 }, { name: 'queryFoodPoisFromRedis', run_type: 'tool' });
+
+/**
+ * Enrich POI with location context (city, neighborhood, and their summaries)
+ *
+ * This function:
+ * 1. Checks if POI already has city/neighborhood cached
+ * 2. If not, performs reverse geocoding to get city/neighborhood
+ * 3. Updates the POI cache with the location data
+ * 4. Fetches city and neighborhood summaries (with caching)
+ * 5. Returns POI-specific area context
+ *
+ * @param {Object} poi - POI object with latitude, longitude, id, name
+ * @param {Object} redisClient - Redis client instance
+ * @returns {Promise<Object>} Area context object with city, neighborhood, cityData, neighborhoodData
+ */
+export async function enrichPoiWithLocationContext(poi, redisClient) {
+  try {
+    debugLog('enrichPoiWithLocationContext: processing POI', poi.id, poi.name);
+
+    let country = poi.country || null;
+    let city = poi.city || null;
+    let neighborhood = poi.neighborhood || null;
+
+    // If POI doesn't have city/neighborhood, perform reverse geocoding
+    if (!city && !neighborhood) {
+      console.log(`[poiHelpers] POI "${poi.name}" missing location context, performing reverse geocoding...`);
+
+      // Pass redisClient for proactive summary caching
+      const geocodeResult = await reverseGeocode(poi.latitude, poi.longitude, redisClient);
+      country = geocodeResult.country;
+      city = geocodeResult.city;
+      neighborhood = geocodeResult.neighborhood;
+
+      debugLog('enrichPoiWithLocationContext: reverse geocoded', { country, city, neighborhood });
+
+      // Update POI cache with location data
+      if (redisClient && poi.id) {
+        try {
+          const placeKey = `poi_cache:${poi.id}`;
+          const existingPlace = await redisClient.json.get(placeKey);
+
+          if (existingPlace) {
+            // Update city, neighborhood, and country fields
+            await redisClient.json.set(placeKey, '$.country', country);
+            await redisClient.json.set(placeKey, '$.city', city);
+            await redisClient.json.set(placeKey, '$.neighborhood', neighborhood);
+            debugLog('enrichPoiWithLocationContext: updated cache with location data');
+          }
+        } catch (err) {
+          console.warn('[poiHelpers] Failed to update POI cache with location data:', err.message);
+        }
+      }
+    } else {
+      debugLog('enrichPoiWithLocationContext: using cached location data', { country, city, neighborhood });
+    }
+
+    // Fetch city and neighborhood summaries (with caching)
+    // Use hierarchical cache keys: country:city and country:city:neighborhood
+    const [cityData, neighborhoodData] = await Promise.all([
+      generateCitySummary(city, country, redisClient),
+      generateNeighborhoodSummary(neighborhood, city, country, redisClient)
+    ]);
+
+    debugLog('enrichPoiWithLocationContext: fetched summaries');
+
+    return {
+      country,
+      city,
+      neighborhood,
+      cityData,
+      neighborhoodData
+    };
+
+  } catch (err) {
+    console.error('[poiHelpers] Failed to enrich POI with location context:', err);
+    // Return empty context on error
+    return {
+      country: null,
+      city: null,
+      neighborhood: null,
+      cityData: { summary: null, keyFacts: null },
+      neighborhoodData: { summary: null, keyFacts: null }
+    };
+  }
+}
 
