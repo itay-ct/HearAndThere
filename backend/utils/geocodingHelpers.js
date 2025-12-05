@@ -1,11 +1,19 @@
 /**
  * Geocoding Helper Functions
- * 
+ *
  * Functions for reverse geocoding and generating area summaries using
  * Google Maps Geocoding API and Gemini LLM.
+ *
+ * DEBUG LOGGING:
+ * To enable detailed debug logging, set the TOUR_DEBUG environment variable:
+ *   - TOUR_DEBUG=1 or TOUR_DEBUG=true
+ *
+ * Example:
+ *   TOUR_DEBUG=1 node index.js
+ *
+ * Or add to your .env file:
+ *   TOUR_DEBUG=1
  */
-
-import { traceable } from 'langsmith/traceable';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const LOCATIONIQ_API_KEY = process.env.LOCATIONIQ_API_KEY;
@@ -136,6 +144,7 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
     let cityValue = null;
     if (address.city && address.town) {
       cityValue = address.city.length > address.town.length ? address.city : address.town;
+      debugLog(`reverseGeocodeWithLocationIQ: Both city and town present - city="${address.city}" (${address.city.length}), town="${address.town}" (${address.town.length}) → chose "${cityValue}"`);
     } else {
       cityValue = address.city || address.town || null;
     }
@@ -144,6 +153,7 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
     let neighborhoodValue = null;
     if (address.suburb && address.neighbourhood) {
       neighborhoodValue = address.suburb.length > address.neighbourhood.length ? address.suburb : address.neighbourhood;
+      debugLog(`reverseGeocodeWithLocationIQ: Both suburb and neighbourhood present - suburb="${address.suburb}" (${address.suburb.length}), neighbourhood="${address.neighbourhood}" (${address.neighbourhood.length}) → chose "${neighborhoodValue}"`);
     } else {
       neighborhoodValue = address.suburb || address.neighbourhood || null;
     }
@@ -177,7 +187,7 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
  * Reverse geocode coordinates to get city and neighborhood
  * Uses LocationIQ first, falls back to Google Maps if LocationIQ fails
  */
-export const reverseGeocode = traceable(async (latitude, longitude) => {
+export async function reverseGeocode(latitude, longitude) {
   // Try LocationIQ first
   const locationIQResult = await reverseGeocodeWithLocationIQ(latitude, longitude);
 
@@ -197,7 +207,7 @@ export const reverseGeocode = traceable(async (latitude, longitude) => {
 
   console.warn('[geocodingHelpers] Both LocationIQ and Google Maps reverse geocoding failed');
   return { city: null, neighborhood: null };
-}, { name: 'reverseGeocode', run_type: 'tool' });
+}
 
 /**
  * Write summary to Redis cache
@@ -320,11 +330,13 @@ export async function generateCitySummary(city, redisClient = null) {
 export async function generateNeighborhoodSummary(neighborhood, city, redisClient = null) {
   if (!neighborhood) return { summary: null, keyFacts: null };
 
-  // Check cache first (use neighborhood name as cache key)
+  // Check cache first (use city:neighborhood as cache key to avoid conflicts)
+  // Different cities can have neighborhoods with the same name
+  const cacheKey = city ? `${city}:${neighborhood}` : neighborhood;
   if (redisClient) {
-    const cached = await readSummaryFromCache(redisClient, 'neighborhood', neighborhood);
+    const cached = await readSummaryFromCache(redisClient, 'neighborhood', cacheKey);
     if (cached) {
-      console.log(`[geocodingHelpers] Using cached neighborhood summary for ${neighborhood}`);
+      console.log(`[geocodingHelpers] Using cached neighborhood summary for ${neighborhood}${city ? ` in ${city}` : ''}`);
       return cached;
     }
   }
@@ -356,9 +368,9 @@ export async function generateNeighborhoodSummary(neighborhood, city, redisClien
         keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
       };
 
-      // Cache the result
+      // Cache the result with city:neighborhood key
       if (redisClient && (result.summary || result.keyFacts)) {
-        await writeSummaryToCache(redisClient, 'neighborhood', neighborhood, result);
+        await writeSummaryToCache(redisClient, 'neighborhood', cacheKey, result);
       }
 
       return result;

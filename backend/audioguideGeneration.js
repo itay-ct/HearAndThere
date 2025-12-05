@@ -117,7 +117,7 @@ async function getLangGraphModules() {
 
 /**
  * Generate content with retry using LangChain model
- * Falls back to gemini-2.5-pro if 429 (rate limit) errors occur
+ * Falls back to gemini-2.5-pro if API errors occur (rate limits, quota, permissions, etc.)
  */
 async function generateWithRetry(prompt, maxRetries = 3) {
   let useFallback = false;
@@ -149,16 +149,21 @@ async function generateWithRetry(prompt, maxRetries = 3) {
 
       console.warn(`[audioguide] Generation failed (attempt ${attempt + 1}):`, errorMessage);
 
-      // Check if it's a 429 rate limit error
-      const is429Error = statusCode === 429 ||
+      // Check if it's an API error (4xx or 5xx status codes, or specific error messages)
+      // This includes: 403 (forbidden), 429 (rate limit), 500 (server error), etc.
+      const isApiError = (statusCode && (statusCode >= 400)) ||
                          errorMessage.includes('429') ||
+                         errorMessage.includes('403') ||
                          errorMessage.includes('rate limit') ||
                          errorMessage.includes('quota exceeded') ||
-                         errorMessage.includes('RESOURCE_EXHAUSTED');
+                         errorMessage.includes('RESOURCE_EXHAUSTED') ||
+                         errorMessage.includes('PERMISSION_DENIED') ||
+                         errorMessage.includes('forbidden') ||
+                         errorMessage.includes('unauthorized');
 
-      // If 429 error and not already using fallback, switch to fallback model
-      if (is429Error && !useFallback) {
-        console.warn(`[audioguide] ⚠️  Rate limit detected! Falling back to gemini-2.5-pro`);
+      // If API error and not already using fallback, switch to fallback model
+      if (isApiError && !useFallback) {
+        console.warn(`[audioguide] ⚠️  API error detected (status: ${statusCode || 'unknown'})! Falling back to gemini-2.5-pro`);
         useFallback = true;
         currentModelName = 'gemini-2.5-pro';
         // Don't count this as a retry attempt, just switch models and try again immediately
