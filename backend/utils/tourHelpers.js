@@ -152,6 +152,9 @@ export async function generateToursWithGemini({
     ? `User customization request: "${customization}". Please incorporate this preference into the tour themes and stop selection.`
     : '';
 
+  // Minimum 2 stops per 30 minutes
+  const minimumStops = (durationMinutes / 30) * 2;
+
   const systemPrompt = [
     'You are a tour-planning assistant with access to real-time Google Maps data.',
     'Use Google Maps to find actual places, verify locations, and calculate real walking distances.',
@@ -163,8 +166,9 @@ export async function generateToursWithGemini({
     'Make sure the tours are not similar in their points of interest,',
     'they should not repeat points of interests, even in different order, ',
     'they should have maximum 1 repetition of a point of interest, ',
-    'otherwise remove the repetition from the candidate tours.',
-    'propose around 10 candidate walking tours with clear themes.',
+    'otherwise remove the repetition from the candidate tours. ',
+    'propose around 10 candidate walking tours with clear themes. ',
+    `I expect a minimum of ${minimumStops} points of interests `,
     `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
     'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
     `Target tours between ${Math.round(durationMinutes * 0.8)} and ${durationMinutes} minutes.`,
