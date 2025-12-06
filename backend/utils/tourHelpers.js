@@ -399,15 +399,15 @@ export async function generateToursWithGemini({
 
   const systemPrompt = [
     'You are a tour-planning assistant with access to real-time Google Maps data.',
-    'Create walking tours using ONLY real places that exist on Google Maps.',
-    'Calculate accurate walking times between actual coordinates.',
+    'Create walking tours using ONLY real places that exist in the list below.',
+//    'Calculate accurate walking times between actual coordinates.',
     'Given a starting point, nearby points of interest, and context,',
-    'propose between 1 to 10 candidate walking tours with clear and varied themes.',
-    'propose around 10 candidate walking tours with clear themes. ',
+    'propose between 2 to 10 candidate walking tours with clear and varied themes.',
+    'Make sure tours do not repeat points of interests more than twice, even in different order, if they do then remove the candidate tour from the list ',
     `I expect around ${minimumStops} points of interests per tour`,
-    `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
-    'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
-    `Target tours between ${Math.round(durationMinutes * 0.8)} and ${durationMinutes} minutes.`,
+//    `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
+//    'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
+    `Target tours ${Math.round(durationMinutes * 0.8)} minutes.`,
     languageInstruction,
     customizationInstruction,
     responseFormatInstruction,
@@ -465,7 +465,7 @@ export async function generateToursWithGemini({
     systemPrompt,
     '',
     `Starting Location: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
-    `Duration: ${durationMinutes} minutes`,
+   // `Duration: ${durationMinutes} minutes`,
     `Language: ${language || 'english'}`,
   ];
 

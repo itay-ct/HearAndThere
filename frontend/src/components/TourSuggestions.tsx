@@ -51,8 +51,9 @@ export function TourSuggestions({
   const loadingCardsToShow = isLoading ? Math.max(0, expectedTourCount - tours.length) : 0
 
   // Get current interesting message for the first loading card
+  // Use modulo to ensure we always get a valid index, and default to first message if index is invalid
   const currentInterestingMessage = interestingMessages.length > 0
-    ? interestingMessages[currentMessageIndex % interestingMessages.length]
+    ? interestingMessages[Math.max(0, currentMessageIndex) % interestingMessages.length]
     : null
 
   return (
@@ -149,9 +150,10 @@ export function TourSuggestions({
 
             {/* Show loading cards for remaining tours */}
             {Array.from({ length: loadingCardsToShow }).map((_, idx) => {
-              // Show interesting message in the first loading card only
-              const isFirstCard = tours.length === 0 && idx === 0
-              const messageToShow = isFirstCard ? currentInterestingMessage : null
+              // Show interesting message in the first LOADING card (idx === 0)
+              // This will always be the first loading card regardless of how many tours are loaded
+              const isFirstLoadingCard = idx === 0
+              const messageToShow = isFirstLoadingCard && currentInterestingMessage ? currentInterestingMessage : null
 
               return (
                 <TourLoadingCard

@@ -215,20 +215,22 @@ function App() {
 
     let currentIndex = 0
 
-    // Set the first message immediately
+    // Set the first message immediately - batch state updates together
     console.log('[RotatingMessages] Setting first message:', messages[0])
+    // Use React 18's automatic batching by updating in the same synchronous block
+    setCurrentMessageIndex(0)
     setLoadingStatus(messages[0].message)
     setLoadingIcon(messages[0].icon)
-    setCurrentMessageIndex(0)
 
     // Then start rotating
     rotatingMessageIntervalRef.current = window.setInterval(() => {
       currentIndex = (currentIndex + 1) % messages.length
       const currentMessage = messages[currentIndex]
-      console.log('[RotatingMessages] Rotating to:', currentMessage)
+      console.log('[RotatingMessages] Rotating to index:', currentIndex, 'message:', currentMessage)
+      // Update index FIRST, then the message content - this ensures the index is always in sync
+      setCurrentMessageIndex(currentIndex)
       setLoadingStatus(currentMessage.message)
       setLoadingIcon(currentMessage.icon)
-      setCurrentMessageIndex(currentIndex)
     }, 4500) // Rotate every 4.5 seconds
   }, [stopRotatingMessages])
 
@@ -284,21 +286,23 @@ function App() {
             // Keep status as 'saving' so the loading cards show alongside real tours
           }
 
-          // If we have interesting messages and tours aren't ready yet, start rotating messages
-          const toursReady = progress.tourCount && progress.tourCount > 0
+          // If we have interesting messages, keep rotating them while still loading
           const hasMessages = progress.interestingMessages && progress.interestingMessages.length > 0
+          const allToursComplete = progress.tourCount && progress.tourCount > 0 && progress.tours && progress.tours.length >= progress.tourCount
 
-          console.log('[Progress] toursReady:', toursReady, 'hasMessages:', hasMessages, 'interestingMessages:', progress.interestingMessages)
+          console.log('[Progress] hasMessages:', hasMessages, 'allToursComplete:', allToursComplete, 'interestingMessages:', progress.interestingMessages)
 
-          if (hasMessages && !toursReady) {
-            setInterestingMessages(progress.interestingMessages)
+          if (hasMessages && !allToursComplete) {
             // Only start rotating if not already rotating
             if (!rotatingMessageIntervalRef.current) {
               console.log('[Progress] Starting rotating messages with:', progress.interestingMessages)
+              // Set messages and start rotating together
+              setInterestingMessages(progress.interestingMessages)
               startRotatingMessages(progress.interestingMessages)
             }
-          } else {
-            // Stop rotating messages when we move to other stages or tours are ready
+            // If already rotating, don't update the messages array to avoid re-renders
+          } else if (allToursComplete) {
+            // Only stop rotating messages when ALL tours are complete
             stopRotatingMessages()
             setLoadingStatus(nextMessage)
           }
