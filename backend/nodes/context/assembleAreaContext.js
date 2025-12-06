@@ -66,7 +66,7 @@ async function generateInterestingMessages(pois) {
 
     const prompt = `Generate 7 interesting aggregative short 1-sentences about this places list (around 8 words). These should entertain the user while he waits for tours to generate. Aggregate them by their types and specify how many places, such as "found 7 great local restaurants around you". Answer ONLY with the 7 lines. for each line add 1 unique icon from this list only
 [utensils, pizza, ice-cream, coffee, cup-soda, beer, wine, egg-fried, drumstick, salad, cake, sandwich, egg, tree, trees, flower, mountain, sprout, leaf, tent, shopping-bag, shopping-cart, store, building, building-2, warehouse, factory, film, film-reel, clapperboard, tv, music, ticket, map-pin, map-pinned, pin, pointer, navigation, navigation-2, locate, locate-fixed, flag, flag-triangle-left, flag-triangle-right, camera, camera-off, binoculars, landmark, museum, hotel]
-output the icon name and then colon and then the sentence (sentence only text, no additional icons).
+output the icon name and then colon and then the sentence (sentence ONLY text characters, no icons).
 List of places and their types:
 ${poiList}`;
 

@@ -81,7 +81,10 @@ export function TourSuggestions({
         <p className="text-sm text-slate-600">
           {isLoading ? (
             <span className="inline-flex items-center gap-2">
-              <span className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></span>
+              <span className="relative flex size-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+                <span className="relative inline-flex size-3 rounded-full bg-sky-500"></span>
+              </span>
               {IconComponent && <IconComponent className="w-4 h-4 text-sky-500" />}
               {loadingStatus}
             </span>
@@ -122,17 +125,25 @@ export function TourSuggestions({
                 </p>
 
                 <ol className="mb-3 space-y-1 text-[11px] text-slate-600">
-                  {tour.stops.map((stop, idx) => (
-                    <li key={`${tour.id}-stop-${idx}`} className="flex gap-2">
-                      <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                      <span className="flex-1">
-                        {stop.name}{' '}
-                        <span className="text-slate-400">
-                          · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
+                  {tour.stops.map((stop, idx) => {
+                    const walkText = stop.walkMinutesFromPrevious > 0 ? `walk ${stop.walkMinutesFromPrevious} min` : null
+                    const dwellText = stop.dwellMinutes > 0 ? `dwell ${stop.dwellMinutes} min` : null
+                    const details = [walkText, dwellText].filter(Boolean).join(' · ')
+
+                    return (
+                      <li key={`${tour.id}-stop-${idx}`} className="flex gap-2">
+                        <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                        <span className="flex-1">
+                          {stop.name}{' '}
+                          {details && (
+                            <span className="text-slate-400">
+                              · {details}
+                            </span>
+                          )}
                         </span>
-                      </span>
-                    </li>
-                  ))}
+                      </li>
+                    )
+                  })}
                 </ol>
 
                 <button

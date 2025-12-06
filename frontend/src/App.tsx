@@ -647,7 +647,7 @@ function App() {
       setMessage(
         finalTourCount > 0
           ? mapStageToMessage('tours_ranked', finalTourCount)
-          : 'Session saved! Your journey is being prepared.',
+          : '', // Don't show message if no tours
       )
     } catch (error) {
       stopProgressPolling()
@@ -1281,17 +1281,25 @@ function App() {
               </p>
 
               <ol className="space-y-2 text-xs text-slate-600">
-                {selectedTour.stops.map((stop, idx) => (
-                  <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
-                    <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                    <span className="flex-1">
-                      {stop.name}{' '}
-                      <span className="text-slate-400">
-                        · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
+                {selectedTour.stops.map((stop, idx) => {
+                  const walkText = stop.walkMinutesFromPrevious > 0 ? `walk ${stop.walkMinutesFromPrevious} min` : null
+                  const dwellText = stop.dwellMinutes > 0 ? `dwell ${stop.dwellMinutes} min` : null
+                  const details = [walkText, dwellText].filter(Boolean).join(' · ')
+
+                  return (
+                    <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
+                      <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                      <span className="flex-1">
+                        {stop.name}{' '}
+                        {details && (
+                          <span className="text-slate-400">
+                            · {details}
+                          </span>
+                        )}
                       </span>
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ol>
             </div>
 
