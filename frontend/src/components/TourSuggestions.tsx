@@ -29,6 +29,8 @@ type TourSuggestionsProps = {
   loadingStatus: string
   loadingIcon: string
   expectedTourCount?: number // Expected total number of tours (for progressive loading)
+  interestingMessages?: Array<{ icon: string; message: string }>
+  currentMessageIndex?: number
 }
 
 export function TourSuggestions({
@@ -41,27 +43,17 @@ export function TourSuggestions({
   isLoading,
   loadingStatus,
   loadingIcon,
-  expectedTourCount = 4 // Default to 4 tours
+  expectedTourCount = 4, // Default to 4 tours
+  interestingMessages = [],
+  currentMessageIndex = 0
 }: TourSuggestionsProps) {
   // Calculate how many loading cards to show
   const loadingCardsToShow = isLoading ? Math.max(0, expectedTourCount - tours.length) : 0
 
-  // Get the icon component from lucide-react
-  const getIconComponent = (iconName: string) => {
-    if (!iconName) return null
-
-    // Convert kebab-case to PascalCase (e.g., "map-pin" -> "MapPin")
-    const pascalCase = iconName
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join('')
-
-    // Get the icon from lucide-react
-    const IconComponent = (LucideIcons as any)[pascalCase]
-    return IconComponent || null
-  }
-
-  const IconComponent = getIconComponent(loadingIcon)
+  // Get current interesting message for the first loading card
+  const currentInterestingMessage = interestingMessages.length > 0
+    ? interestingMessages[currentMessageIndex % interestingMessages.length]
+    : null
 
   return (
     <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
@@ -85,8 +77,7 @@ export function TourSuggestions({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
                 <span className="relative inline-flex size-3 rounded-full bg-sky-500"></span>
               </span>
-              {IconComponent && <IconComponent className="w-4 h-4 text-sky-500" />}
-              {loadingStatus}
+              Looking around you...
             </span>
           ) : (
             neighborhood || city
@@ -157,9 +148,19 @@ export function TourSuggestions({
             ))}
 
             {/* Show loading cards for remaining tours */}
-            {Array.from({ length: loadingCardsToShow }).map((_, idx) => (
-              <TourLoadingCard key={`loading-${tours.length + idx}`} tourNumber={tours.length + idx + 1} />
-            ))}
+            {Array.from({ length: loadingCardsToShow }).map((_, idx) => {
+              // Show interesting message in the first loading card only
+              const isFirstCard = tours.length === 0 && idx === 0
+              const messageToShow = isFirstCard ? currentInterestingMessage : null
+
+              return (
+                <TourLoadingCard
+                  key={`loading-${tours.length + idx}`}
+                  tourNumber={tours.length + idx + 1}
+                  interestingMessage={messageToShow}
+                />
+              )
+            })}
           </div>
         </div>
       </div>

@@ -58,6 +58,7 @@ function App() {
   const [loadingIcon, setLoadingIcon] = useState<string>('')
   const [showTourSuggestions, setShowTourSuggestions] = useState<boolean>(false)
   const [interestingMessages, setInterestingMessages] = useState<Array<{ icon: string; message: string }>>([])
+  const [currentMessageIndex, setCurrentMessageIndex] = useState<number>(0)
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
@@ -218,6 +219,7 @@ function App() {
     console.log('[RotatingMessages] Setting first message:', messages[0])
     setLoadingStatus(messages[0].message)
     setLoadingIcon(messages[0].icon)
+    setCurrentMessageIndex(0)
 
     // Then start rotating
     rotatingMessageIntervalRef.current = window.setInterval(() => {
@@ -226,6 +228,7 @@ function App() {
       console.log('[RotatingMessages] Rotating to:', currentMessage)
       setLoadingStatus(currentMessage.message)
       setLoadingIcon(currentMessage.icon)
+      setCurrentMessageIndex(currentIndex)
     }, 4500) // Rotate every 4.5 seconds
   }, [stopRotatingMessages])
 
@@ -718,6 +721,7 @@ function App() {
     setLoadingStatus('')
     setLoadingIcon('')
     setInterestingMessages([])
+    setCurrentMessageIndex(0)
     setStatus('idle')
   }, [sessionId, stopProgressPolling, stopRotatingMessages])
 
@@ -1237,6 +1241,8 @@ function App() {
               loadingStatus={loadingStatus}
               loadingIcon={loadingIcon}
               expectedTourCount={4}
+              interestingMessages={interestingMessages}
+              currentMessageIndex={currentMessageIndex}
             />
           </div>
         )}
