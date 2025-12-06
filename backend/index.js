@@ -312,6 +312,15 @@ async function start() {
         }
       }
 
+      let neighborhoodData = null;
+      if (data.neighborhoodData) {
+        try {
+          neighborhoodData = JSON.parse(data.neighborhoodData);
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       res.json({
         sessionId,
         stage: data.stage || null,
@@ -320,6 +329,7 @@ async function start() {
         tourCount,
         tours, // Include actual tours array for progressive display
         interestingMessages,
+        neighborhoodData, // Include neighborhood data with intro_script and intro_audio_url
         status: tourCount > 0 ? 'tours-ready' : 'in-progress',
       });
     } catch (err) {

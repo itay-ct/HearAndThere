@@ -150,8 +150,7 @@ export function TourSuggestions({
 
             {/* Show loading cards for remaining tours */}
             {Array.from({ length: loadingCardsToShow }).map((_, idx) => {
-              // Show interesting message in the first LOADING card (idx === 0)
-              // This will always be the first loading card regardless of how many tours are loaded
+              // Show interesting message ONLY in the first loading card
               const isFirstLoadingCard = idx === 0
               const messageToShow = isFirstLoadingCard && currentInterestingMessage ? currentInterestingMessage : null
 

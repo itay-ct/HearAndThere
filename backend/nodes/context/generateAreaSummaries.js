@@ -41,14 +41,20 @@ export function createGenerateAreaSummariesNode({ redisClient }) {
       // Check for cancellation before expensive LLM operations
       await checkCancellation(sessionId, redisClient, 'generateAreaSummaries');
 
-      // Generate city and neighborhood summaries in parallel (with caching)
+      // Generate city summary first, then neighborhood summary (so we can pass city data to neighborhood)
       // Use hierarchical cache keys: country:city and country:city:neighborhood
-      const [cityData, neighborhoodData] = await Promise.all([
-        generateCitySummary(city, country, redisClient),
-        generateNeighborhoodSummary(neighborhood, city, country, redisClient),
-      ]);
+      console.log('[generateAreaSummaries] Generating city summary...');
+      const cityData = await generateCitySummary(city, country, redisClient);
+
+      console.log('[generateAreaSummaries] Generating neighborhood summary with intro script...');
+      const language = state.language || 'english';
+      const neighborhoodData = await generateNeighborhoodSummary(neighborhood, city, country, redisClient, cityData, language);
 
       console.log('[generateAreaSummaries] Area summaries generated');
+      if (neighborhoodData?.intro_script) {
+        console.log('[generateAreaSummaries] ✅ Intro script generated for neighborhood');
+        console.log('[generateAreaSummaries] 🎵 TTS generation triggered automatically in geocodingHelpers');
+      }
 
       const msg = {
         role: 'assistant',
@@ -71,7 +77,7 @@ export function createGenerateAreaSummariesNode({ redisClient }) {
       return {
         messages: [...messages, errorMsg],
         cityData: { summary: null, keyFacts: null },
-        neighborhoodData: { summary: null, keyFacts: null }
+        neighborhoodData: { summary: null, keyFacts: null, intro_script: null }
       };
     }
   };

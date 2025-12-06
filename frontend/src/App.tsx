@@ -66,6 +66,7 @@ function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
   const rotatingMessageIntervalRef = useRef<number | null>(null)
+  const interestingMessagesRef = useRef<Array<{ icon: string; message: string }>>([])
   // Store auto-detected city/neighborhood/country separately so they can be restored
   const savedCityRef = useRef<string | null>(null)
   const savedNeighborhoodRef = useRef<string | null>(null)
@@ -207,31 +208,47 @@ function App() {
   const startRotatingMessages = useCallback((messages: Array<{ icon: string; message: string }>) => {
     console.log('[RotatingMessages] Starting with messages:', messages)
     if (messages.length === 0) {
-      console.log('[RotatingMessages] No messages to rotate, exiting')
+      console.log('[RotatingMessages] ⚠️ No messages to rotate, exiting')
       return
     }
 
     stopRotatingMessages()
 
-    let currentIndex = 0
+    // Store messages in ref so interval can always access latest
+    interestingMessagesRef.current = messages
 
-    // Set the first message immediately - batch state updates together
-    console.log('[RotatingMessages] Setting first message:', messages[0])
-    // Use React 18's automatic batching by updating in the same synchronous block
+    // Set the first message immediately
+    console.log('[RotatingMessages] ✅ Setting first message:', messages[0])
     setCurrentMessageIndex(0)
     setLoadingStatus(messages[0].message)
     setLoadingIcon(messages[0].icon)
 
-    // Then start rotating
+    // Then start rotating - read from ref to always get latest messages
     rotatingMessageIntervalRef.current = window.setInterval(() => {
-      currentIndex = (currentIndex + 1) % messages.length
-      const currentMessage = messages[currentIndex]
-      console.log('[RotatingMessages] Rotating to index:', currentIndex, 'message:', currentMessage)
-      // Update index FIRST, then the message content - this ensures the index is always in sync
-      setCurrentMessageIndex(currentIndex)
-      setLoadingStatus(currentMessage.message)
-      setLoadingIcon(currentMessage.icon)
+      setCurrentMessageIndex(prevIndex => {
+        const currentMessages = interestingMessagesRef.current
+        if (currentMessages.length === 0) {
+          console.warn('[RotatingMessages] ⚠️ No messages in ref, stopping rotation')
+          return prevIndex
+        }
+
+        const nextIndex = (prevIndex + 1) % currentMessages.length
+        console.log('[RotatingMessages] 🔄 Rotating from index', prevIndex, 'to', nextIndex, 'of', currentMessages.length, 'messages')
+
+        // Update the message content based on the new index
+        const currentMessage = currentMessages[nextIndex]
+        if (currentMessage) {
+          setLoadingStatus(currentMessage.message)
+          setLoadingIcon(currentMessage.icon)
+        } else {
+          console.warn('[RotatingMessages] ⚠️ No message at index', nextIndex)
+        }
+
+        return nextIndex
+      })
     }, 4500) // Rotate every 4.5 seconds
+
+    console.log('[RotatingMessages] ✅ Rotation interval started')
   }, [stopRotatingMessages])
 
   const mapStageToMessage = useCallback(
@@ -290,19 +307,30 @@ function App() {
           const hasMessages = progress.interestingMessages && progress.interestingMessages.length > 0
           const allToursComplete = progress.tourCount && progress.tourCount > 0 && progress.tours && progress.tours.length >= progress.tourCount
 
-          console.log('[Progress] hasMessages:', hasMessages, 'allToursComplete:', allToursComplete, 'interestingMessages:', progress.interestingMessages)
+          console.log('[Progress] Message rotation state:', {
+            hasMessages,
+            allToursComplete,
+            messagesCount: progress.interestingMessages?.length || 0,
+            isCurrentlyRotating: !!rotatingMessageIntervalRef.current,
+            currentMessagesInState: interestingMessages.length
+          })
 
           if (hasMessages && !allToursComplete) {
-            // Only start rotating if not already rotating
-            if (!rotatingMessageIntervalRef.current) {
-              console.log('[Progress] Starting rotating messages with:', progress.interestingMessages)
-              // Set messages and start rotating together
+            // Update messages state AND ref immediately if they've changed
+            if (progress.interestingMessages.length !== interestingMessages.length) {
+              console.log('[Progress] ✅ Updating interesting messages:', progress.interestingMessages)
               setInterestingMessages(progress.interestingMessages)
+              interestingMessagesRef.current = progress.interestingMessages
+            }
+
+            // Start rotating if not already rotating
+            if (!rotatingMessageIntervalRef.current) {
+              console.log('[Progress] 🔄 Starting rotating messages with:', progress.interestingMessages)
               startRotatingMessages(progress.interestingMessages)
             }
-            // If already rotating, don't update the messages array to avoid re-renders
           } else if (allToursComplete) {
             // Only stop rotating messages when ALL tours are complete
+            console.log('[Progress] ⏹️ Stopping rotation - all tours complete')
             stopRotatingMessages()
             setLoadingStatus(nextMessage)
           }

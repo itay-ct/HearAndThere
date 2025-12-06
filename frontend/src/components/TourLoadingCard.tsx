@@ -23,6 +23,14 @@ export function TourLoadingCard({ tourNumber, interestingMessage }: TourLoadingC
 
   const IconComponent = interestingMessage ? getIconComponent(interestingMessage.icon) : null
 
+  // Debug logging
+  console.log(`[TourLoadingCard #${tourNumber}]`, {
+    hasInterestingMessage: !!interestingMessage,
+    icon: interestingMessage?.icon,
+    hasIconComponent: !!IconComponent,
+    messagePreview: interestingMessage?.message?.substring(0, 50) + '...'
+  })
+
   return (
     <article className="min-w-[260px] flex-1 rounded-2xl border border-slate-200 px-4 py-4 bg-white/90 animate-pulse">
       <div className="flex items-center justify-center h-full min-h-[300px]">

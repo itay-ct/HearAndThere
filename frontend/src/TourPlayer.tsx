@@ -54,6 +54,18 @@ interface Scripts {
   stops?: Script[]
 }
 
+interface NeighborhoodIntro {
+  intro_script?: string
+  intro_audio_url?: string
+  intro_audio_status?: 'pending' | 'generating' | 'complete' | 'failed'
+}
+
+interface AreaContext {
+  city?: string
+  neighborhood?: string
+  neighborhoodData?: NeighborhoodIntro
+}
+
 interface TourData {
   tourId: string
   status: string
@@ -67,6 +79,7 @@ interface TourData {
   tour?: Tour
   scripts?: Scripts
   audioFiles?: AudioFiles
+  areaContext?: AreaContext
   error?: string
 }
 
@@ -447,24 +460,7 @@ export default function TourPlayer() {
           />
         </div>
 
-        {/* Audio Player */}
-        {tourData.status === 'generating' && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
-              <h3 className="text-sm font-semibold text-sky-900 mb-4">
-                🎧 Generating Audioguide
-              </h3>
-              <p className="text-xs text-sky-700 mb-4">
-                Creating engaging narration for your tour. This may take a few minutes...
-              </p>
-              <div className="flex items-center gap-3 text-xs">
-                <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-sky-700">Generating scripts and audio...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
+        {/* Audio Player - Show immediately with loading states */}
         {tourData.status === 'failed' && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
             <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6">
@@ -478,8 +474,8 @@ export default function TourPlayer() {
           </div>
         )}
 
-        {/* Audio Files */}
-        {tourData.status === 'complete' && tourData.audioFiles && (
+        {/* Audio Files - Show immediately, even while generating */}
+        {tourData.tour && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
             <h2 className="text-2xl font-semibold text-slate-900 mb-6">🎧 Audioguide</h2>
 
@@ -488,51 +484,135 @@ export default function TourPlayer() {
               <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-neutral-300"></div>
 
               <div className="relative">
-                {/* Intro */}
-                {tourData.audioFiles.intro && (
-                  <div className="relative">
+                {/* Neighborhood Intro */}
+                {tourData.areaContext?.neighborhoodData && (
+                  <div className="relative mb-6">
                     {/* Timeline Circle */}
                     <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex items-center gap-3">
-                        {tourData.audioFiles?.intro?.status === "generating" ? (
-                          <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                        ) : tourData.audioFiles?.intro?.url ? (
+                        {/* Play/Pause or Spinner */}
+                        {tourData.areaContext.neighborhoodData.intro_audio_status === 'generating' || tourData.areaContext.neighborhoodData.intro_audio_status === 'pending' ? (
+                          <div role="status" className="shrink-0">
+                            <svg aria-hidden="true" className="w-11 h-11 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                              <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                            </svg>
+                            <span className="sr-only">Loading...</span>
+                          </div>
+                        ) : tourData.areaContext.neighborhoodData.intro_audio_url ? (
                           <button
-                            onClick={() => handlePlayPause("intro", tourData.audioFiles!.intro!.url!)}
+                            onClick={() => handlePlayPause("neighborhood-intro", tourData.areaContext!.neighborhoodData!.intro_audio_url!)}
                             className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
                           >
-                            {currentlyPlaying === "intro" ? <Pause size={20} /> : <Play size={20} />}
+                            {currentlyPlaying === "neighborhood-intro" ? <Pause size={20} /> : <Play size={20} />}
                           </button>
                         ) : null}
 
                         <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-slate-900">Introduction</h3>
-                          <p className="text-xs text-slate-500">Welcome to your tour</p>
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            {tourData.areaContext.neighborhood || 'Neighborhood'} Introduction
+                          </h3>
+                          <p className="text-xs text-slate-500">While your audioguide is being prepared...</p>
                         </div>
 
-                        {tourData.scripts?.intro && (
+                        {/* Show script button or generating indicator */}
+                        {tourData.areaContext.neighborhoodData.intro_script ? (
                           <button
-                            onClick={() => toggleScript("intro")}
+                            onClick={() => toggleScript("neighborhood-intro")}
                             className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
                           >
-                             <span>{expandedScripts.has("intro") ? 'hide script' : 'show script'}</span>
-                             {expandedScripts.has("intro") ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            <span>{expandedScripts.has("neighborhood-intro") ? 'hide script' : 'show script'}</span>
+                            {expandedScripts.has("neighborhood-intro") ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </button>
+                        ) : (
+                          <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <div role="status">
+                              <svg aria-hidden="true" className="w-4 h-4 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                                <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                              </svg>
+                              <span className="sr-only">Loading...</span>
+                            </div>
+                            <span>generating script</span>
+                          </div>
                         )}
                       </div>
 
-                      {tourData.scripts?.intro && expandedScripts.has("intro") && (
+                      {tourData.areaContext.neighborhoodData.intro_script && expandedScripts.has("neighborhood-intro") && (
                         <div className="mt-4 pt-4 border-t border-slate-100">
                           <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
-                            {tourData.scripts.intro.content}
+                            {tourData.areaContext.neighborhoodData.intro_script}
                           </div>
                         </div>
                       )}
                     </div>
                   </div>
                 )}
+
+                {/* Tour Intro */}
+                <div className="relative mb-6">
+                  {/* Timeline Circle */}
+                  <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white"></div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center gap-3">
+                      {/* Play/Pause or Spinner */}
+                      {tourData.audioFiles?.intro?.status === "generating" || (!tourData.audioFiles?.intro?.url && tourData.status === 'generating') ? (
+                        <div role="status" className="shrink-0">
+                          <svg aria-hidden="true" className="w-11 h-11 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                            <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                          </svg>
+                          <span className="sr-only">Loading...</span>
+                        </div>
+                      ) : tourData.audioFiles?.intro?.url ? (
+                        <button
+                          onClick={() => handlePlayPause("intro", tourData.audioFiles!.intro!.url!)}
+                          className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
+                        >
+                          {currentlyPlaying === "intro" ? <Pause size={20} /> : <Play size={20} />}
+                        </button>
+                      ) : null}
+
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-slate-900">Tour Introduction</h3>
+                        <p className="text-xs text-slate-500">Welcome to your tour</p>
+                      </div>
+
+                      {/* Show script button or generating indicator */}
+                      {tourData.scripts?.intro ? (
+                        <button
+                          onClick={() => toggleScript("intro")}
+                          className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
+                        >
+                          <span>{expandedScripts.has("intro") ? 'hide script' : 'show script'}</span>
+                          {expandedScripts.has("intro") ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </button>
+                      ) : tourData.status === 'generating' ? (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <div role="status">
+                            <svg aria-hidden="true" className="w-4 h-4 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                              <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                            </svg>
+                            <span className="sr-only">Loading...</span>
+                          </div>
+                          <span>generating script</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {tourData.scripts?.intro && expandedScripts.has("intro") && (
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
+                          {tourData.scripts.intro.content}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
               {/* Walking Directions from Starting Point to First Stop */}
               {tourData.tour && tourData.tour.stops.length > 0 && tourData.tour.stops[0].walkingDirections && (
@@ -580,7 +660,7 @@ export default function TourPlayer() {
                   const audioKey = `stop-${index}`
 
                   return (
-                    <div key={index} className="relative">
+                    <div key={index} className="relative mb-6">
                       {/* Timeline Marker with Number */}
                       <div className="absolute -left-[33px] top-6 w-7 h-7 rounded-full bg-neutral-400 border-3 border-white flex items-center justify-center">
                         <span className="text-white text-xs font-bold">{index + 1}</span>
@@ -589,8 +669,15 @@ export default function TourPlayer() {
                       {/* Stop Card */}
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="flex items-center gap-3">
-                          {audioFile?.status === 'generating' ? (
-                            <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                          {/* Play/Pause or Spinner */}
+                          {audioFile?.status === 'generating' || (!audioFile?.url && tourData.status === 'generating') ? (
+                            <div role="status" className="shrink-0">
+                              <svg aria-hidden="true" className="w-11 h-11 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                                <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                              </svg>
+                              <span className="sr-only">Loading...</span>
+                            </div>
                           ) : audioFile?.url ? (
                             <button
                               onClick={() => handlePlayPause(audioKey, audioFile.url!)}
@@ -609,7 +696,8 @@ export default function TourPlayer() {
                               </p>
                             )}
                           </div>
-                          {script && (
+                          {/* Show script button or generating indicator */}
+                          {script ? (
                             <button
                               onClick={() => toggleScript(audioKey)}
                               className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
@@ -617,7 +705,18 @@ export default function TourPlayer() {
                               <span>{expandedScripts.has(audioKey) ? 'hide script' : 'show script'}</span>
                               {expandedScripts.has(audioKey) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             </button>
-                          )}
+                          ) : tourData.status === 'generating' ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-400">
+                              <div role="status">
+                                <svg aria-hidden="true" className="w-4 h-4 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                                  <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                                </svg>
+                                <span className="sr-only">Loading...</span>
+                              </div>
+                              <span>generating script</span>
+                            </div>
+                          ) : null}
                         </div>
 
                         {script && expandedScripts.has(audioKey) && (

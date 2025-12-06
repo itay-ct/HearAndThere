@@ -192,7 +192,7 @@ async function generateWithRetry(prompt, maxRetries = 3) {
 /**
  * Generate script for tour introduction
  */
-async function generateIntroScript({ tour, locationSummaries, language }) {
+async function generateIntroScript({ tour, locationSummaries, language, areaContext }) {
   const languageInstruction = language === 'hebrew'
     ? 'Write the ENTIRE script in HEBREW (עברית). Use natural, conversational Hebrew.'
     : 'Write the ENTIRE script in ENGLISH.';
@@ -249,6 +249,12 @@ async function generateIntroScript({ tour, locationSummaries, language }) {
     console.warn('[generateIntroScript] ⚠️ WARNING: No location summaries available for intro!');
   }
 
+  // Extract neighborhood intro script from areaContext
+  const neighborhoodIntroScript = areaContext?.neighborhoodData?.intro_script || null;
+  const neighborhoodIntroSection = neighborhoodIntroScript
+    ? `\nNeighbourhood intro script, this was played just before what you need to produce:\n${neighborhoodIntroScript}\n`
+    : '';
+
   const prompt = `You are a professional tour guide creating an engaging audio introduction for a walking tour.
 
 Tour Details:
@@ -260,17 +266,16 @@ Tour Details:
 
 Context about the areas you'll visit:${areaContextText}
 
-Create a warm, engaging 2-3 minute introduction script that:
-1. Welcomes the visitor
-2. Introduces the tour theme and what makes it special
-3. Gives a brief overview of what they'll experience and the areas they'll explore
+Create a warm, engaging 2 minute tour introduction script that:
+1. Introduces the tour theme and what makes it special
+2. Gives a brief overview of what they'll experience and the areas they'll explore
+3. Don't repeate the same content of the neighborhood introduction and make this tour intro to be natuarlly continuation of the neighborhood introduction.
 4. Sets an enthusiastic, friendly tone
 5. Mentions the number of stops and approximate duration
-
+${neighborhoodIntroSection}
 ${languageInstruction}
 Write in a natural, conversational style as if speaking directly to the visitor.
-Do NOT include stage directions or speaker labels - just the script text.
-Keep it between 300-450 words.`;
+Do NOT include stage directions or speaker labels - just the script text.`;
 
   try {
     const { script, modelUsed } = await generateWithRetry(prompt);
@@ -350,12 +355,13 @@ ${isLast ? '- This is the LAST stop - include closing remarks' : ''}
 Context about the area:${areaContextText}
 ${walkingContext}
 
-Create an engaging 3-5 minute audio script that:
+Create an engaging 1-5 minute audio script that:
 1. ${isFirst ? 'Welcomes them to the first stop' : `Introduces stop ${stopIndex + 1}`}
 2. Shares fascinating historical facts, stories, or cultural significance about ${stop.name}
 3. Points out interesting architectural or visual details they should notice
 4. Includes surprising or little-known facts that tourists would love
 5. ${isLast ? 'Concludes the tour with warm closing remarks and thanks them for joining' : `Provides clear walking directions to the next stop, mentioning the street names and any interesting context about those streets (historical significance, famous buildings, local culture, etc.)`}
+6. The length depends on the richnest of the stop, the more depth the stop has the longer the script should be.
 
 ${!isLast ? `IMPORTANT: End the script by guiding them to the next stop. Use the walking directions provided above to give them clear, friendly guidance. If the streets have interesting historical or cultural significance, mention it! For example: "Now we'll head down Ben Yehuda Street, named after the father of modern Hebrew, where you'll see..."` : ''}
 
@@ -618,13 +624,27 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
 
   // Node: Generate a single script (intro or stop)
   const generateScriptNode = async (state) => {
-    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, previousStop, language, locationSummaries, stopLocationMap } = state;
+    const { scriptType, stopIndex, selectedTour, areaContext, stop, nextStop, previousStop, language, locationSummaries, stopLocationMap, tourId } = state;
 
     console.log(`[audioguide] Generating ${scriptType} script, stopIndex:`, stopIndex, 'language:', language);
 
     let result;
     if (scriptType === 'intro') {
-      result = await generateIntroScript({ tour: selectedTour, locationSummaries, language });
+      result = await generateIntroScript({ tour: selectedTour, locationSummaries, language, areaContext });
+
+      // Save intro script to Redis immediately
+      const tourDataKey = `tour:${tourId}`;
+      try {
+        await redisClient.json.set(tourDataKey, '$.scripts.intro', {
+          status: 'complete',
+          content: result.script,
+          modelUsed: result.modelUsed
+        });
+        console.log(`[audioguide] ✅ Saved intro script to Redis for tour ${tourId}`);
+      } catch (err) {
+        console.warn(`[audioguide] Failed to save intro script to Redis:`, err);
+      }
+
       return {
         scripts: {
           intro: {
@@ -672,6 +692,19 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
         content: result.script,
         modelUsed: result.modelUsed
       };
+
+      // Save stop script to Redis immediately
+      const tourDataKey = `tour:${tourId}`;
+      try {
+        await redisClient.json.set(tourDataKey, `$.scripts.stops[${stopIndex}]`, {
+          status: 'complete',
+          content: result.script,
+          modelUsed: result.modelUsed
+        });
+        console.log(`[audioguide] ✅ Saved stop ${stopIndex} script to Redis for tour ${tourId}`);
+      } catch (err) {
+        console.warn(`[audioguide] Failed to save stop ${stopIndex} script to Redis:`, err);
+      }
 
       return {
         scripts: {
@@ -807,5 +840,39 @@ export async function generateAudioguide({ sessionId, tourId, selectedTour, area
     scripts: finalState.scripts,
     audioFiles: finalState.audioFiles,
   };
+}
+
+/**
+ * Generate TTS audio for neighborhood intro script
+ * Uses the same synthesizeAudio function as the audioguide generation
+ *
+ * @param {Object} params
+ * @param {string} params.introScript - The intro script text
+ * @param {string} params.outputFileName - Output filename (e.g., "neighborhood_intro_uuid.mp3")
+ * @param {string} params.language - Language (e.g., 'english', 'hebrew')
+ * @param {string} params.voice - Voice name (optional, will use default for language)
+ * @returns {Promise<string>} Audio URL
+ */
+export async function generateNeighborhoodIntroAudio({ introScript, outputFileName, language, voice }) {
+  console.log('[audioguide] Generating neighborhood intro audio:', {
+    outputFileName,
+    language,
+    voice,
+    textLength: introScript.length
+  });
+
+  // Determine voice if not provided
+  const selectedVoice = voice || (language === 'hebrew' ? 'he-IL-Standard-D' : 'en-GB-Wavenet-B');
+
+  // Use the same synthesizeAudio function
+  const audioUrl = await synthesizeAudio({
+    text: introScript,
+    outputFileName,
+    language,
+    voice: selectedVoice
+  });
+
+  console.log('[audioguide] ✅ Neighborhood intro audio generated:', audioUrl);
+  return audioUrl;
 }
 

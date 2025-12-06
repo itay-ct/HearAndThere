@@ -15,6 +15,9 @@
  *   TOUR_DEBUG=1
  */
 
+import { generateNeighborhoodIntroAudio } from '../audioguideGeneration.js';
+import { v4 as uuidv4 } from 'uuid';
+
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const LOCATIONIQ_API_KEY = process.env.LOCATIONIQ_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -577,16 +580,106 @@ export async function generateCitySummary(city, country = null, redisClient = nu
 }
 
 /**
+ * Generate intro script for neighborhood using Gemini Flash 2.5
+ * Creates a 1-2 minute spoken introduction about the neighborhood
+ *
+ * @param {string} neighborhood - Neighborhood name
+ * @param {string} city - City name
+ * @param {string} country - Country name
+ * @param {string} neighborhoodSummary - Summary of the neighborhood
+ * @param {Array<string>} neighborhoodKeyFacts - Key facts about the neighborhood
+ * @param {string} citySummary - Summary of the city (optional)
+ * @param {Array<string>} cityKeyFacts - Key facts about the city (optional)
+ * @returns {Promise<string|null>} Intro script text or null if generation fails
+ */
+async function generateNeighborhoodIntroScript(
+  neighborhood,
+  city,
+  country,
+  neighborhoodSummary,
+  neighborhoodKeyFacts,
+  citySummary = null,
+  cityKeyFacts = null
+) {
+  if (!GEMINI_API_KEY) {
+    console.warn('[geocodingHelpers] GEMINI_API_KEY not set, cannot generate intro script');
+    return null;
+  }
+
+  const model = await getGeminiModel();
+  if (!model) return null;
+
+  // Build context from summaries and key facts
+  const neighborhoodContext = [
+    neighborhoodSummary,
+    ...(neighborhoodKeyFacts || [])
+  ].filter(Boolean).join('\n- ');
+
+  const cityContext = citySummary || cityKeyFacts?.length > 0
+    ? [citySummary, ...(cityKeyFacts || [])].filter(Boolean).join('\n- ')
+    : null;
+
+  const prompt = `You are creating a welcoming audio introduction for a walking tour.
+
+LOCATION:
+Neighborhood: ${neighborhood}
+City: ${city}
+Country: ${country}
+
+NEIGHBORHOOD CONTEXT:
+${neighborhoodContext}
+
+${cityContext ? `CITY CONTEXT:\n${cityContext}\n` : ''}
+
+TASK:
+Write a 1-2 minute spoken introduction script that:
+1. Starts with: "While your audioguide is being prepared, here's an intro about ${neighborhood}..."
+2. Provides interesting insights about the neighborhood and city
+3. Makes the listener excited to explore
+4. Ends with an excited tone: "Let's go!"
+
+REQUIREMENTS:
+- Natural, conversational tone (as if speaking to a friend)
+- 150-250 words (1-2 minutes when spoken)
+- Engaging and enthusiastic
+- Focus on what makes this area special
+- NO markdown, NO special formatting, just plain text
+- End with "Let's go!"
+
+Write the script now:`;
+
+  try {
+    console.log('[geocodingHelpers] Generating intro script for', neighborhood, city);
+    const response = await model.invoke(prompt);
+    const script = response.content?.trim() || null;
+
+    if (script) {
+      console.log(`[geocodingHelpers] ✅ Generated intro script (${script.length} chars)`);
+      return script;
+    }
+
+    console.warn('[geocodingHelpers] ⚠️ Empty intro script generated');
+    return null;
+  } catch (err) {
+    console.error('[geocodingHelpers] Failed to generate intro script:', err);
+    return null;
+  }
+}
+
+/**
  * Generate neighborhood summary using Gemini LLM
  * Checks cache first, only generates if not cached
+ * Also generates intro_script for the neighborhood
  *
  * @param {string} neighborhood - Neighborhood name
  * @param {string} city - City name (optional)
  * @param {string} country - Full country name (e.g., "Israel", "United States") - optional
  * @param {Object} redisClient - Redis client instance
- * @returns {Promise<Object>} Summary object with { summary, keyFacts }
+ * @param {Object} cityData - City summary data with { summary, keyFacts } (optional, for intro script)
+ * @param {string} language - Language for TTS generation (e.g., 'english', 'hebrew') - optional
+ * @returns {Promise<Object>} Summary object with { summary, keyFacts, intro_script }
  */
-export async function generateNeighborhoodSummary(neighborhood, city = null, country = null, redisClient = null) {
+export async function generateNeighborhoodSummary(neighborhood, city = null, country = null, redisClient = null, cityData = null, language = 'english') {
   if (!neighborhood) {
     const error = new Error('generateNeighborhoodSummary called without a neighborhood');
     console.error('[geocodingHelpers] ❌ ERROR:', error.message, { neighborhood, city, country });
@@ -617,11 +710,17 @@ export async function generateNeighborhoodSummary(neighborhood, city = null, cou
   // Not in cache, generate with Gemini
   if (!GEMINI_API_KEY) {
     console.warn('[geocodingHelpers] GEMINI_API_KEY not set, cannot generate neighborhood summary');
-    return { summary: null, keyFacts: null };
+    return {
+      summary: null,
+      keyFacts: null,
+      intro_script: null,
+      intro_audio_url: null,
+      intro_audio_status: 'pending'
+    };
   }
 
   const model = await getGeminiModel();
-  if (!model) return { summary: null, keyFacts: null };
+  if (!model) return { summary: null, keyFacts: null, intro_script: null };
 
   // Build location description with available parts, including country for better LLM context
   console.log('[geocodingHelpers] generateNeighborhoodSummary - country:', country, 'city:', city, 'neighborhood:', neighborhood);
@@ -645,12 +744,69 @@ export async function generateNeighborhoodSummary(neighborhood, city = null, cou
       const parsed = JSON.parse(jsonText);
       const result = {
         summary: parsed.summary || null,
-        keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null
+        keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : null,
+        intro_script: null, // Will be generated next
+        intro_audio_url: null, // Will be set by TTS generation
+        intro_audio_status: 'pending' // Status: pending, generating, complete, failed
       };
+
+      // Generate intro script using the summary and key facts
+      console.log('[geocodingHelpers] Generating intro script for neighborhood...');
+      const introScript = await generateNeighborhoodIntroScript(
+        neighborhood,
+        city,
+        country,
+        result.summary,
+        result.keyFacts,
+        cityData?.summary,
+        cityData?.keyFacts
+      );
+
+      result.intro_script = introScript;
 
       // Cache the result using hierarchical key: country:city:neighborhood (only if we have country)
       if (redisClient && country && (result.summary || result.keyFacts)) {
         await writeSummaryToCache(redisClient, country, city, neighborhood, result);
+        console.log('[geocodingHelpers] ✅ Cached neighborhood data with intro_script and TTS status');
+
+        // Trigger TTS generation immediately in background (don't await)
+        if (introScript) {
+          console.log('[geocodingHelpers] 🎵 Triggering TTS generation for intro script...');
+
+          // Generate unique filename
+          const audioId = uuidv4();
+          const fileName = `neighborhood_intro_${audioId}.mp3`;
+          const cacheKey = `summary_cache:${country}:${city}:${neighborhood}`;
+
+          // Update status to 'generating' before starting
+          redisClient.json.set(cacheKey, '$.intro_audio_status', 'generating')
+            .catch(err => console.warn('[geocodingHelpers] Failed to update status to generating:', err));
+
+          // Generate TTS audio
+          generateNeighborhoodIntroAudio({
+            introScript,
+            outputFileName: fileName,
+            language,
+            voice: null // Will use default voice for language
+          }).then(async (audioUrl) => {
+            console.log('[geocodingHelpers] ✅ Neighborhood intro TTS generated:', audioUrl);
+
+            // Update cache with audio URL
+            await redisClient.json.set(cacheKey, '$.intro_audio_url', audioUrl);
+            await redisClient.json.set(cacheKey, '$.intro_audio_status', 'complete');
+            console.log(`[geocodingHelpers] ✅ Updated cache with audio URL at ${cacheKey}`);
+          }).catch(async (err) => {
+            console.error('[geocodingHelpers] ❌ Failed to generate neighborhood intro TTS:', err);
+
+            // Update cache with failed status
+            try {
+              await redisClient.json.set(cacheKey, '$.intro_audio_status', 'failed');
+              await redisClient.json.set(cacheKey, '$.intro_audio_error', err.message || 'TTS generation failed');
+            } catch (redisErr) {
+              console.error('[geocodingHelpers] Failed to update cache with error status:', redisErr);
+            }
+          });
+        }
       } else if (redisClient && !country) {
         console.warn('[geocodingHelpers] ⚠️ Cannot cache neighborhood summary without country. Summary generated but not cached.');
       }
@@ -661,6 +817,12 @@ export async function generateNeighborhoodSummary(neighborhood, city = null, cou
     console.warn(`[geocodingHelpers] Failed to generate neighborhood summary for ${location}`, err);
   }
 
-  return { summary: null, keyFacts: null };
+  return {
+    summary: null,
+    keyFacts: null,
+    intro_script: null,
+    intro_audio_url: null,
+    intro_audio_status: 'pending'
+  };
 }
 

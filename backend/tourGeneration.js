@@ -285,6 +285,7 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   const initialState = {
     messages: [],
     sessionId, // Pass sessionId to state so nodes can check cancellation
+    language: language || 'english', // Pass language to state for TTS generation
     ...(providedCity && { city: providedCity }),
     ...(providedNeighborhood && { neighborhood: providedNeighborhood }),
     ...(providedCountry && { country: providedCountry })

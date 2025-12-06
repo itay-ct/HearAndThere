@@ -15,6 +15,12 @@ export function createTourState(Annotation, MessagesAnnotation) {
       default: () => null,
     }),
 
+    // Language preference
+    language: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => 'english',
+    }),
+
     // Area context (assembled from multiple nodes)
     areaContext: Annotation({
       reducer: (x, y) => y ?? x,
