@@ -41,7 +41,7 @@ async function getGeminiModel() {
   return geminiModelPromise;
 }
 
-// Define JSON schema for tour generation structured output
+// Define JSON schema for tour generation structured output (non-streaming)
 const tourGenerationSchema = {
   type: "object",
   properties: {
@@ -107,6 +107,179 @@ const tourGenerationSchema = {
   required: ["tours"]
 };
 
+// Define JSON schema for streaming tour generation (top-level array)
+const tourGenerationStreamingSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "Unique identifier for the tour"
+      },
+      title: {
+        type: "string",
+        description: "Tour title"
+      },
+      abstract: {
+        type: "string",
+        description: "Brief description of the tour"
+      },
+      theme: {
+        type: "string",
+        description: "Tour theme (e.g., History, Food & Culture, Hidden Gems)"
+      },
+      estimatedTotalMinutes: {
+        type: "number",
+        description: "Total estimated duration in minutes including walking and dwell time"
+      },
+      stops: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Name of the stop/POI"
+            },
+            latitude: {
+              type: "number",
+              description: "Latitude coordinate"
+            },
+            longitude: {
+              type: "number",
+              description: "Longitude coordinate"
+            },
+            dwellMinutes: {
+              type: "number",
+              description: "Time to spend at this stop in minutes"
+            },
+            walkMinutesFromPrevious: {
+              type: "number",
+              description: "Walking time from previous stop in minutes (0 for first stop)"
+            }
+          },
+          required: ["name", "latitude", "longitude", "dwellMinutes", "walkMinutesFromPrevious"]
+        }
+      }
+    },
+    required: ["id", "title", "abstract", "theme", "estimatedTotalMinutes", "stops"]
+  }
+};
+
+/**
+ * Manual streaming JSON extractor for tour objects
+ * Accumulates streamed JSON text and emits each completed top-level {...} tour object
+ * as soon as it becomes valid JSON
+ *
+ * @param {AsyncIterable<string>} textStream - Stream of text chunks
+ * @yields {Object} Complete tour objects as they become available
+ */
+async function* extractToursFromStream(textStream) {
+  let buffer = '';
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  let currentTourStart = -1;
+  let toursEmitted = 0;
+
+  // Track which fields we've seen for the current tour
+  let currentTourFields = new Set();
+
+  for await (const chunk of textStream) {
+    buffer += chunk;
+
+    for (let i = buffer.length - chunk.length; i < buffer.length; i++) {
+      const char = buffer[i];
+
+      // Handle string escaping
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+
+      if (char === '\\' && inString) {
+        escapeNext = true;
+        continue;
+      }
+
+      // Handle string boundaries
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      // Skip characters inside strings
+      if (inString) {
+        continue;
+      }
+
+      // Track depth of nested objects/arrays
+      if (char === '{') {
+        if (depth === 0) {
+          // Start of a new tour object (we're inside the top-level array)
+          currentTourStart = i;
+          currentTourFields = new Set(); // Reset field tracking
+        }
+        depth++;
+      } else if (char === '}') {
+        depth--;
+        if (depth === 0 && currentTourStart !== -1) {
+          // End of a tour object - try to parse it
+          const tourJson = buffer.substring(currentTourStart, i + 1);
+          try {
+            const tour = JSON.parse(tourJson);
+            toursEmitted++;
+            console.log(`[tourHelpers] 🎉 Streamed tour ${toursEmitted}: ${tour.title || 'Untitled'}`);
+            debugLog(`Streamed tour ${toursEmitted}:`, tour);
+            yield tour;
+
+            // Clear the buffer up to this point to save memory
+            buffer = buffer.substring(i + 1);
+            i = -1; // Reset index since we modified buffer
+            currentTourStart = -1;
+            currentTourFields = new Set(); // Reset for next tour
+          } catch (err) {
+            // Not valid JSON yet, but check if we can extract partial fields
+            if (currentTourStart !== -1) {
+              const partialJson = buffer.substring(currentTourStart, i + 1);
+
+              // Try to detect when we get title, abstract, theme
+              if (!currentTourFields.has('title') && partialJson.includes('"title"')) {
+                const titleMatch = partialJson.match(/"title"\s*:\s*"([^"]+)"/);
+                if (titleMatch) {
+                  console.log(`[tourHelpers] 📝 Got tour title: "${titleMatch[1]}"`);
+                  currentTourFields.add('title');
+                }
+              }
+
+              if (!currentTourFields.has('abstract') && partialJson.includes('"abstract"')) {
+                const abstractMatch = partialJson.match(/"abstract"\s*:\s*"([^"]+)"/);
+                if (abstractMatch) {
+                  console.log(`[tourHelpers] 📄 Got tour abstract: "${abstractMatch[1].substring(0, 50)}..."`);
+                  currentTourFields.add('abstract');
+                }
+              }
+
+              if (!currentTourFields.has('theme') && partialJson.includes('"theme"')) {
+                const themeMatch = partialJson.match(/"theme"\s*:\s*"([^"]+)"/);
+                if (themeMatch) {
+                  console.log(`[tourHelpers] 🎨 Got tour theme: "${themeMatch[1]}"`);
+                  currentTourFields.add('theme');
+                }
+              }
+            }
+
+            debugLog('Tour JSON not yet complete, continuing...');
+          }
+        }
+      }
+    }
+  }
+
+  debugLog(`Streaming complete. Total tours emitted: ${toursEmitted}`);
+}
+
 /**
  * Generate heuristic tours from POIs (fallback when LLM is unavailable)
  */
@@ -170,7 +343,11 @@ export function heuristicToursFromPois({ latitude, longitude, durationMinutes, c
 }
 
 /**
- * Generate tours using Gemini LLM
+ * Generate tours using Gemini LLM with streaming support
+ *
+ * @param {Object} options - Generation options
+ * @param {boolean} options.streaming - Enable streaming mode (default: false)
+ * @returns {Promise<Array>|AsyncGenerator<Object>} Tours array or async generator of tour objects
  */
 export async function generateToursWithGemini({
   latitude,
@@ -185,7 +362,8 @@ export async function generateToursWithGemini({
   neighborhoodData,
   foodPois = [],
   sessionId = null,
-  redisClient = null
+  redisClient = null,
+  streaming = false
 }) {
   const fallback = () =>
     heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
@@ -214,28 +392,27 @@ export async function generateToursWithGemini({
   // Minimum 2 stops per 30 minutes
   const minimumStops = (durationMinutes / 30) * 2;
 
+  // Build system prompt based on streaming mode
+  const responseFormatInstruction = streaming
+    ? 'Respond strictly as a JSON array of tour objects (top-level array, not wrapped in an object).'
+    : 'Respond strictly as JSON with a top-level "tours" array.';
+
   const systemPrompt = [
     'You are a tour-planning assistant with access to real-time Google Maps data.',
-    'Use Google Maps to find actual places, verify locations, and calculate real walking distances.',
     'Create walking tours using ONLY real places that exist on Google Maps.',
-    'Verify each location exists before including it in a tour.',
     'Calculate accurate walking times between actual coordinates.',
     'Given a starting point, nearby points of interest, and context,',
-    'propose between 1 to 10 candidate walking tours with clear themes.',
-    'Make sure the tours are not similar in their points of interest,',
-    'they should not repeat points of interests, even in different order, ',
-    'they should have maximum 1 repetition of a point of interest, ',
-    'otherwise remove the repetition from the candidate tours. ',
+    'propose between 1 to 10 candidate walking tours with clear and varied themes.',
     'propose around 10 candidate walking tours with clear themes. ',
-    `I expect a minimum of ${minimumStops} points of interests `,
+    `I expect around ${minimumStops} points of interests per tour`,
     `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
     'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
     `Target tours between ${Math.round(durationMinutes * 0.8)} and ${durationMinutes} minutes.`,
     languageInstruction,
     customizationInstruction,
-    'Respond strictly as JSON with a top-level "tours" array.',
-    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
-    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
+    responseFormatInstruction,
+//    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
+//    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
   // Helper function to format POI as simple text
@@ -252,7 +429,10 @@ export async function generateToursWithGemini({
   const allPois = [...(Array.isArray(pois) ? pois : [])];
 
   // For tours 2+ hours, add food POIs with [FOOD] marker
-  const shouldIncludeFood = durationMinutes >= 120 && Array.isArray(foodPois) && foodPois.length > 0;
+  // DISABLED FOR NOW
+  //const shouldIncludeFood = durationMinutes >= 120 && Array.isArray(foodPois) && foodPois.length > 0;
+  const shouldIncludeFood = false;
+
   if (shouldIncludeFood) {
     allPois.push(...foodPois.map(poi => ({ ...poi, _isFood: true })));
   }
@@ -284,7 +464,6 @@ export async function generateToursWithGemini({
   const inputParts = [
     systemPrompt,
     '',
-    '=== TOUR CONTEXT ===',
     `Starting Location: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
     `Duration: ${durationMinutes} minutes`,
     `Language: ${language || 'english'}`,
@@ -297,13 +476,11 @@ export async function generateToursWithGemini({
   inputParts.push('');
 
   if (cityContextText) {
-    inputParts.push('=== CITY CONTEXT ===');
     inputParts.push(cityContextText);
     inputParts.push('');
   }
 
   if (neighborhoodContextText) {
-    inputParts.push('=== NEIGHBORHOOD CONTEXT ===');
     inputParts.push(neighborhoodContextText);
     inputParts.push('');
   }
@@ -328,11 +505,79 @@ export async function generateToursWithGemini({
     city,
     neighborhood,
     poiCount: allPois.length,
+    streaming,
   });
 
   // Check for cancellation before expensive Gemini call
   await checkCancellation(sessionId, redisClient, 'generateToursWithGemini');
 
+  // STREAMING MODE
+  if (streaming) {
+    console.log('[tourHelpers] 🌊 Starting streaming tour generation...');
+
+    // Wrap streaming call with traceable for LangSmith observability
+    const generateToursStreamingTraceable = traceable(
+      async function* (promptText) {
+        // Use streaming with structured output
+        const streamResult = await model.generateContentStream({
+          contents: [{ role: 'user', parts: [{ text: promptText }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: tourGenerationStreamingSchema,
+          },
+        });
+
+        // Create async generator for text chunks
+        async function* textChunks() {
+          for await (const chunk of streamResult.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              yield chunkText;
+            }
+          }
+        }
+
+        // Extract and yield tours as they become complete
+        for await (const tour of extractToursFromStream(textChunks())) {
+          yield tour;
+        }
+      },
+      {
+        name: 'generate_tours_with_gemini_streaming',
+        run_type: 'llm',
+        metadata: {
+          model: GEMINI_MODEL,
+          latitude,
+          longitude,
+          durationMinutes,
+          city,
+          neighborhood,
+          poiCount: allPois.length,
+          language,
+          streaming: true,
+        },
+      }
+    );
+
+    // Return an async generator that yields tours as they're streamed
+    return (async function* () {
+      try {
+        for await (const tour of generateToursStreamingTraceable(prompt)) {
+          yield tour;
+        }
+      } catch (err) {
+        console.error('[tourHelpers] ❌ Streaming failed:', err);
+        debugLog('generateToursWithGemini (streaming): error', err?.message || err);
+        // Yield fallback tours
+        const fallbackTours = fallback();
+        for (const tour of fallbackTours) {
+          yield tour;
+        }
+      }
+    })();
+  }
+
+  // NON-STREAMING MODE (original implementation)
   // Wrap Gemini call with traceable for LangSmith observability
   const generateToursTraceable = traceable(
     async (promptText) => {
@@ -349,7 +594,7 @@ export async function generateToursWithGemini({
       const text = response.text();
 
       debugLog('generateToursWithGemini: structured output response length', text.length);
-      console.log('[tourHelpers] generateToursWithGemini: structured output preview:', text.substring(0, 500));
+      debugLog('generateToursWithGemini: structured output preview:', text.substring(0, 500));
 
       return text;
     },
@@ -365,6 +610,7 @@ export async function generateToursWithGemini({
         neighborhood,
         poiCount: allPois.length,
         language,
+        streaming: false,
       },
     }
   );
@@ -417,45 +663,7 @@ export async function generateToursWithGemini({
   }
 }
 
-/**
- * Filter and rank tours by duration and variety
- */
-export function filterAndRankTours(tours, durationMinutes) {
-  if (!Array.isArray(tours)) return [];
 
-  console.log('[tourHelpers] filterAndRankTours: input tours count', tours.length);
-
-  const target = durationMinutes;
-  const scored = tours.map((tour, index) => {
-    const total = typeof tour.estimatedTotalMinutes === 'number' ? tour.estimatedTotalMinutes : target;
-    const durationPenalty = Math.abs(total - target);
-    const stopCount = Array.isArray(tour.stops) ? tour.stops.length : 0;
-    const varietyBonus = stopCount;
-    const score = -durationPenalty + 0.5 * varietyBonus;
-
-    console.log('[tourHelpers] filterAndRankTours: tour scoring', {
-      id: tour.id,
-      title: tour.title,
-      estimatedMinutes: total,
-      durationPenalty,
-      varietyBonus,
-      score
-    });
-
-    return { tour: { ...tour, estimatedTotalMinutes: total }, score, index };
-  });
-
-  scored.sort((a, b) => b.score - a.score || a.index - b.index);
-  const topTours = scored.slice(0, 3).map((entry, idx) => ({
-    ...entry.tour,
-    id: entry.tour.id || `tour_${idx + 1}`,
-  }));
-
-  console.log('[tourHelpers] filterAndRankTours: final tours count', topTours.length);
-  console.log('[tourHelpers] filterAndRankTours: final tour IDs', topTours.map(t => t.id));
-
-  return topTours;
-}
 
 /**
  * Get walking directions from Google Maps Directions API
@@ -502,136 +710,78 @@ export const getWalkingDirections = traceable(async (origin, destination, waypoi
 }, { name: 'getWalkingDirections', run_type: 'tool' });
 
 /**
- * Validate walking times using Google Maps Directions API
+ * Validate walking times for a single tour using Google Maps Directions API
+ * @param {Object} tour - Tour object to validate
+ * @param {number} startLatitude - Starting latitude
+ * @param {number} startLongitude - Starting longitude
+ * @returns {Promise<Object>} Validated tour with updated walking times
  */
-export async function validateWalkingTimes(tours, startLatitude, startLongitude, redisClient = null) {
-  if (!GOOGLE_MAPS_API_KEY || !Array.isArray(tours) || tours.length === 0) {
-    console.warn('[tourHelpers] Cannot validate walking times - missing API key or no tours');
-    return tours;
+export async function validateSingleTour(tour, startLatitude, startLongitude) {
+  if (!GOOGLE_MAPS_API_KEY) {
+    console.warn('[tourHelpers] Cannot validate walking times - missing API key');
+    return tour;
   }
 
-  const validatedTours = [];
+  if (!Array.isArray(tour.stops) || tour.stops.length < 1) {
+    return tour;
+  }
 
-  for (const tour of tours) {
-    if (!Array.isArray(tour.stops) || tour.stops.length < 1) {
-      validatedTours.push(tour);
-      continue;
+  try {
+    // Include the user's starting position as the origin
+    const origin = `${startLatitude},${startLongitude}`;
+    const destination = `${tour.stops[tour.stops.length - 1].latitude},${tour.stops[tour.stops.length - 1].longitude}`;
+
+    // Build waypoints including ALL tour stops except the last one
+    let waypoints = null;
+    if (tour.stops.length > 1) {
+      const waypointCoords = tour.stops.slice(0, -1).map(stop => `${stop.latitude},${stop.longitude}`);
+      waypoints = waypointCoords.join('|');
     }
 
-    try {
-      // Include the user's starting position as the origin
-      const origin = `${startLatitude},${startLongitude}`;
-      const destination = `${tour.stops[tour.stops.length - 1].latitude},${tour.stops[tour.stops.length - 1].longitude}`;
+    console.log('[tourHelpers] Validating walking times for tour:', tour.id);
 
-      // Build waypoints including ALL tour stops except the last one
-      let waypoints = null;
-      if (tour.stops.length > 1) {
-        const waypointCoords = tour.stops.slice(0, -1).map(stop => `${stop.latitude},${stop.longitude}`);
-        waypoints = waypointCoords.join('|');
-      }
+    const data = await getWalkingDirections(origin, destination, waypoints);
+    if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
+      console.warn('[tourHelpers] No valid route found for tour', tour.id, 'API status:', data.status);
+      return tour;
+    }
 
-      console.log('[tourHelpers] Validating walking times for tour:', tour.id);
+    const route = data.routes[0];
+    const legs = route.legs || [];
 
-      const data = await getWalkingDirections(origin, destination, waypoints);
-      if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
-        console.warn('[tourHelpers] No valid route found for tour', tour.id, 'API status:', data.status);
-        validatedTours.push(tour);
-        continue;
-      }
+    // Now we should have legs.length === tour.stops.length (including start->first POI)
+    if (legs.length !== tour.stops.length) {
+      console.warn('[tourHelpers] Leg count mismatch for tour', tour.id, 'expected:', tour.stops.length, 'got:', legs.length);
+      return tour;
+    }
 
-      const route = data.routes[0];
-      const legs = route.legs || [];
-
-      // Now we should have legs.length === tour.stops.length (including start->first POI)
-      if (legs.length !== tour.stops.length) {
-        console.warn('[tourHelpers] Leg count mismatch for tour', tour.id, 'expected:', tour.stops.length, 'got:', legs.length);
-        validatedTours.push(tour);
-        continue;
-      }
-
-      // Calculate LLM vs Google Maps walking times
-      let llmTotalWalkingMinutes = 0;
-      let googleTotalWalkingMinutes = 0;
-
-      const updatedStops = tour.stops.map((stop, index) => {
-        const updatedStop = {
-          ...stop,
-          walkMinutesFromPrevious_llm: stop.walkMinutesFromPrevious // Save original LLM estimate
-        };
-
-        // Get Google Maps walking time and directions for this leg
-        const leg = legs[index];
-        const googleWalkingSeconds = leg.duration?.value || 0;
-        const googleWalkingMinutes = Math.ceil(googleWalkingSeconds / 60);
-        const distanceMeters = leg.distance?.value || 0;
-
-        updatedStop.walkMinutesFromPrevious = googleWalkingMinutes;
-        updatedStop.distanceMeters = distanceMeters;
-
-        // Extract walking directions with street names
-        if (leg.steps && leg.steps.length > 0) {
-          // Store walking directions as an object with distance, duration, and steps array
-          updatedStop.walkingDirections = {
-            distance: leg.distance?.text || '',
-            duration: leg.duration?.text || '',
-            steps: leg.steps.map(step => ({
-              instruction: step.html_instructions || '', // Keep HTML for proper display
-              distance: step.distance?.text || '',
-              duration: step.duration?.text || '',
-            }))
-          };
-
-          // Extract street names from the steps
-          const streetNames = leg.steps
-            .map(step => {
-              const instruction = step.html_instructions || '';
-              // Try to extract street names from instructions
-              const match = instruction.match(/on\s+<b>([^<]+)<\/b>/i) ||
-                           instruction.match(/onto\s+<b>([^<]+)<\/b>/i) ||
-                           instruction.match(/toward\s+<b>([^<]+)<\/b>/i);
-              return match ? match[1] : null;
-            })
-            .filter(Boolean);
-
-          updatedStop.streetNames = [...new Set(streetNames)]; // Remove duplicates
-        }
-
-        llmTotalWalkingMinutes += stop.walkMinutesFromPrevious || 0;
-        googleTotalWalkingMinutes += googleWalkingMinutes;
-
-        return updatedStop;
-      });
-
-      // Calculate total tour time with Google Maps walking times
-      const totalDwellMinutes = updatedStops.reduce((sum, stop) => sum + (stop.dwellMinutes || 0), 0);
-      const updatedTotalMinutes = googleTotalWalkingMinutes + totalDwellMinutes;
-
-      const validatedTour = {
-        ...tour,
-        stops: updatedStops,
-        estimatedTotalMinutes_llm: tour.estimatedTotalMinutes, // Save original LLM estimate
-        estimatedTotalMinutes: updatedTotalMinutes
+    // Update each stop with actual walking time from Google Maps
+    const updatedStops = tour.stops.map((stop, i) => {
+      const leg = legs[i];
+      const actualWalkMinutes = leg.duration?.value ? Math.ceil(leg.duration.value / 60) : stop.walkMinutesFromPrevious;
+      return {
+        ...stop,
+        walkMinutesFromPrevious: actualWalkMinutes
       };
+    });
 
-      // Debug logging
-      console.log('[tourHelpers] Walking time validation for tour', tour.id, {
-        llmTotalWalkingMinutes,
-        googleTotalWalkingMinutes,
-        difference: googleTotalWalkingMinutes - llmTotalWalkingMinutes,
-        llmTotalTourMinutes: tour.estimatedTotalMinutes,
-        googleTotalTourMinutes: updatedTotalMinutes,
-        tourTimeDifference: updatedTotalMinutes - tour.estimatedTotalMinutes
-      });
+    // Recalculate total tour duration
+    const totalWalkMinutes = updatedStops.reduce((sum, stop) => sum + (stop.walkMinutesFromPrevious || 0), 0);
+    const totalDwellMinutes = updatedStops.reduce((sum, stop) => sum + (stop.dwellMinutes || 0), 0);
+    const estimatedTotalMinutes = totalWalkMinutes + totalDwellMinutes;
 
-      validatedTours.push(validatedTour);
+    console.log(`[tourHelpers] ✅ Validated tour "${tour.title}": ${estimatedTotalMinutes} min (walk: ${totalWalkMinutes}, dwell: ${totalDwellMinutes})`);
 
-    } catch (err) {
-      console.error('[tourHelpers] Error validating walking times for tour', tour.id, err.message);
-      // Always include the tour even if validation fails
-      validatedTours.push(tour);
-    }
+    return {
+      ...tour,
+      stops: updatedStops,
+      estimatedTotalMinutes
+    };
+  } catch (err) {
+    console.error('[tourHelpers] Error validating tour', tour.id, err);
+    return tour;
   }
-
-  return validatedTours;
 }
+
+
 

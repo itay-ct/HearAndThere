@@ -274,6 +274,13 @@ function App() {
           const nextMessage = mapStageToMessage(progress.stage, progress.tourCount)
           setMessage(nextMessage)
 
+          // Update tours progressively as they arrive
+          if (progress.tours && Array.isArray(progress.tours) && progress.tours.length > 0) {
+            console.log('[Progress] Updating tours progressively:', progress.tours.length)
+            setTours(progress.tours)
+            // Keep status as 'saving' so the loading cards show alongside real tours
+          }
+
           // If we have interesting messages and tours aren't ready yet, start rotating messages
           const toursReady = progress.tourCount && progress.tourCount > 0
           const hasMessages = progress.interestingMessages && progress.interestingMessages.length > 0
@@ -620,12 +627,26 @@ function App() {
       setSessionId(data.sessionId ?? clientSessionId)
       setCity(data.city ?? null)
       setNeighborhood(data.neighborhood ?? null)
-      setTours(hasTours ? (data.tours as Tour[]) : [])
+
+      // Only update tours if we don't already have tours from streaming
+      // This prevents overwriting tours that were progressively loaded via progress polling
+      let finalTourCount = 0
+      setTours(prevTours => {
+        if (prevTours.length > 0) {
+          console.log('[POST Complete] Keeping streamed tours:', prevTours.length)
+          finalTourCount = prevTours.length
+          return prevTours
+        }
+        console.log('[POST Complete] Using tours from response:', data.tours?.length || 0)
+        finalTourCount = data.tours?.length || 0
+        return hasTours ? (data.tours as Tour[]) : []
+      })
+
       setSelectedTourId(null)
-      setToursGenerated(hasTours)
+      setToursGenerated(finalTourCount > 0)
       setMessage(
-        hasTours
-          ? mapStageToMessage('tours_ranked', data.tours.length)
+        finalTourCount > 0
+          ? mapStageToMessage('tours_ranked', finalTourCount)
           : 'Session saved! Your journey is being prepared.',
       )
     } catch (error) {
@@ -1212,9 +1233,10 @@ function App() {
               }}
               neighborhood={neighborhood}
               city={city}
-              isLoading={status === 'saving' && tours.length === 0}
+              isLoading={status === 'saving'}
               loadingStatus={loadingStatus}
               loadingIcon={loadingIcon}
+              expectedTourCount={4}
             />
           </div>
         )}

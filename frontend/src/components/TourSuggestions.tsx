@@ -28,6 +28,7 @@ type TourSuggestionsProps = {
   isLoading: boolean
   loadingStatus: string
   loadingIcon: string
+  expectedTourCount?: number // Expected total number of tours (for progressive loading)
 }
 
 export function TourSuggestions({
@@ -39,8 +40,12 @@ export function TourSuggestions({
   city,
   isLoading,
   loadingStatus,
-  loadingIcon
+  loadingIcon,
+  expectedTourCount = 4 // Default to 4 tours
 }: TourSuggestionsProps) {
+  // Calculate how many loading cards to show
+  const loadingCardsToShow = isLoading ? Math.max(0, expectedTourCount - tours.length) : 0
+
   // Get the icon component from lucide-react
   const getIconComponent = (iconName: string) => {
     if (!iconName) return null
@@ -91,9 +96,6 @@ export function TourSuggestions({
       <div className="space-y-4">
         <div className="-mx-4 overflow-x-auto pb-2">
           <div className="flex gap-4 px-1">
-            {/* Show loading card when loading */}
-            {isLoading && <TourLoadingCard tourNumber={1} />}
-
             {/* Show actual tours */}
             {tours.map((tour) => (
               <article
@@ -141,6 +143,11 @@ export function TourSuggestions({
                   {selectedTourId === tour.id ? 'Selected' : 'Select this tour'}
                 </button>
               </article>
+            ))}
+
+            {/* Show loading cards for remaining tours */}
+            {Array.from({ length: loadingCardsToShow }).map((_, idx) => (
+              <TourLoadingCard key={`loading-${tours.length + idx}`} tourNumber={tours.length + idx + 1} />
             ))}
           </div>
         </div>

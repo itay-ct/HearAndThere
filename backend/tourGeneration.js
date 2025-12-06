@@ -17,7 +17,6 @@ import { createAssembleAreaContextNode } from './nodes/context/assembleAreaConte
 
 // Import tour nodes
 import { createGenerateCandidateToursNode } from './nodes/tours/generateCandidateTours.js';
-import { createValidateWalkingTimesNode } from './nodes/tours/validateWalkingTimes.js';
 
 // Add debug logging at the top
 console.log('[tourGeneration] LangSmith config check:', {
@@ -137,13 +136,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     redisClient
   });
 
-  const validateWalkingTimesNode = createValidateWalkingTimesNode({
-    latitude,
-    longitude,
-    durationMinutes: normalizedDuration,
-    redisClient
-  });
-
   // Routing functions
   const shouldCheckCache = (state) => {
     // Check cache only if no customization
@@ -189,7 +181,6 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     .addNode('generate_area_summaries', generateAreaSummariesNode)
     .addNode('assemble_area_context', assembleAreaContextNode)
     .addNode('generate_candidate_tours', generateCandidatesNode)
-    .addNode('validate_walking_times', validateWalkingTimesNode)
     // Routing
     .addConditionalEdges(
       START,
@@ -219,8 +210,7 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     .addEdge('reverse_geocode', 'generate_area_summaries')
     .addEdge('generate_area_summaries', 'assemble_area_context')
     .addEdge('assemble_area_context', 'generate_candidate_tours')
-    .addEdge('generate_candidate_tours', 'validate_walking_times')
-    .addEdge('validate_walking_times', END);
+    .addEdge('generate_candidate_tours', END);
 
   // Compile graph with checkpointer if available
   let checkpointer = null;

@@ -287,10 +287,12 @@ async function start() {
       }
 
       let tourCount = 0;
+      let tours = [];
       if (data.tours) {
         try {
           const parsed = JSON.parse(data.tours);
           if (Array.isArray(parsed)) {
+            tours = parsed;
             tourCount = parsed.length;
           }
         } catch {
@@ -316,6 +318,7 @@ async function start() {
         city: data.city || null,
         neighborhood: data.neighborhood || null,
         tourCount,
+        tours, // Include actual tours array for progressive display
         interestingMessages,
         status: tourCount > 0 ? 'tours-ready' : 'in-progress',
       });

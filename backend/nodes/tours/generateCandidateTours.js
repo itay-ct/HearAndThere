@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { generateToursWithGemini } from '../../utils/tourHelpers.js';
+import { generateToursWithGemini, validateSingleTour } from '../../utils/tourHelpers.js';
 import { queryFoodPoisFromRedis } from '../../utils/poiHelpers.js';
 import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
@@ -110,8 +110,9 @@ export function createGenerateCandidateToursNode({
       // Check for cancellation again before calling Gemini (expensive operation)
       await checkCancellation(sessionId, redisClient, 'generateCandidateTours');
 
-      // Generate tours using Gemini LLM
-      const rawTours = await generateToursWithGemini({
+      // Generate tours using Gemini LLM with streaming (always enabled)
+      console.log('[generateCandidateTours] 🌊 Starting streaming tour generation...');
+      const tourStream = await generateToursWithGemini({
         latitude,
         longitude,
         durationMinutes,
@@ -125,23 +126,50 @@ export function createGenerateCandidateToursNode({
         foodPois: foodPois,
         sessionId, // Pass sessionId for cancellation checks
         redisClient, // Pass redisClient for cancellation checks
+        streaming: true, // Always use streaming for tour generation
       });
 
-      console.log('[generateCandidateTours] Generated tours count:', Array.isArray(rawTours) ? rawTours.length : 0);
+      // Consume the stream, validate each tour, and send to frontend immediately
+      const rawTours = [];
+      const validatedTours = [];
 
-      // Assign unique UUIDs to each tour immediately after generation
-      // Store the LLM-generated ID as originalTourId for reference
-      const allTours = (Array.isArray(rawTours) ? rawTours : []).map(tour => ({
-        ...tour,
-        originalTourId: tour.id, // Keep LLM-generated ID (e.g., "RAA-001", "tel-aviv-green-escapes")
-        id: uuidv4() // Always assign a new UUID for caching and storage
-      }));
+      for await (const tour of tourStream) {
+        console.log(`[generateCandidateTours] 📥 Received streamed tour: ${tour.title || 'Untitled'}`);
 
-      console.log('[generateCandidateTours] Assigned UUIDs to', allTours.length, 'tours');
+        // Assign UUID immediately
+        const tourWithId = {
+          ...tour,
+          originalTourId: tour.id,
+          id: uuidv4(),
+        };
+
+        rawTours.push(tourWithId);
+
+        // Validate walking times immediately
+        console.log(`[generateCandidateTours] 🔍 Validating tour: ${tourWithId.title}`);
+        const validatedTour = await validateSingleTour(tourWithId, latitude, longitude);
+        validatedTours.push(validatedTour);
+
+        // Send validated tour to Redis immediately so frontend can display it
+        const sessionKey = `session:${sessionId}`;
+        try {
+          await redisClient.hSet(sessionKey, {
+            tours: JSON.stringify(validatedTours),
+          });
+          console.log(`[generateCandidateTours] ✅ Sent ${validatedTours.length} tour(s) to frontend`);
+        } catch (err) {
+          console.error('[generateCandidateTours] Failed to update Redis with streamed tour:', err);
+        }
+      }
+
+      console.log(`[generateCandidateTours] ✅ Streaming complete. Received and validated ${validatedTours.length} tours`);
+
+      // Tours are already validated and have UUIDs assigned
+      const allTours = validatedTours;
 
       const msg = {
         role: 'system',
-        content: `Generated ${Array.isArray(rawTours) ? rawTours.length : 0} tours with unique IDs, keeping all ${allTours.length} for validation.`,
+        content: `Generated and validated ${allTours.length} tours with streaming.`,
       };
 
       return {
