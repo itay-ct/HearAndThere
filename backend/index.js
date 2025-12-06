@@ -495,9 +495,15 @@ async function start() {
         // Store full tour data with stops and walking directions
         tour: selectedTour,
         areaContext,
-        // Placeholders for scripts and audio files (will be added when generation completes)
-        scripts: null,
-        audioFiles: null,
+        // Initialize scripts structure with proper array size
+        scripts: {
+          intro: null,
+          stops: new Array(selectedTour.stops.length).fill(null)
+        },
+        audioFiles: {
+          intro: null,
+          stops: new Array(selectedTour.stops.length).fill(null)
+        },
         createdAt: new Date().toISOString()
       };
 
@@ -618,6 +624,13 @@ async function start() {
       }
 
       const tourData = tourDataArray[0];
+
+      // Parse startLocation "longitude,latitude" and add separate fields for frontend
+      if (tourData.startLocation) {
+        const [startLongitude, startLatitude] = tourData.startLocation.split(',').map(parseFloat);
+        tourData.startLatitude = startLatitude;
+        tourData.startLongitude = startLongitude;
+      }
 
       // Return the complete tour document (includes tour, scripts, audioFiles, etc.)
       res.json(tourData);

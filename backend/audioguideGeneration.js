@@ -696,6 +696,19 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
       // Save stop script to Redis immediately
       const tourDataKey = `tour:${tourId}`;
       try {
+        // First ensure the stops array exists and has enough elements
+        const currentScripts = await redisClient.json.get(tourDataKey, { path: '$.scripts.stops' });
+        const stopsArray = (Array.isArray(currentScripts) && currentScripts.length > 0) ? currentScripts[0] : [];
+        
+        // Extend array if needed
+        while (stopsArray.length <= stopIndex) {
+          stopsArray.push(null);
+        }
+        
+        // Update the entire stops array first
+        await redisClient.json.set(tourDataKey, '$.scripts.stops', stopsArray);
+        
+        // Now set the specific stop
         await redisClient.json.set(tourDataKey, `$.scripts.stops[${stopIndex}]`, {
           status: 'complete',
           content: result.script,

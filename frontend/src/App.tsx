@@ -419,8 +419,8 @@ function App() {
           accuracy: pos.coords.accuracy,
           timestamp: new Date(pos.timestamp).toISOString()
         })
-        const lat = Number(pos.coords.latitude.toFixed(6))
-        const lon = Number(pos.coords.longitude.toFixed(6))
+        const lat = pos.coords.latitude
+        const lon = pos.coords.longitude
         setLatitude(lat)
         setLongitude(lon)
         setLocationStatus('detected')
@@ -451,8 +451,8 @@ function App() {
                 accuracy: pos.coords.accuracy,
                 timestamp: new Date(pos.timestamp).toISOString()
               })
-              const lat = Number(pos.coords.latitude.toFixed(6))
-              const lon = Number(pos.coords.longitude.toFixed(6))
+              const lat = pos.coords.latitude
+              const lon = pos.coords.longitude
               setLatitude(lat)
               setLongitude(lon)
               setLocationStatus('detected')

@@ -297,13 +297,15 @@ export default function TourPlayer() {
   }
 
   const toggleDirections = (index: number) => {
-    const newExpanded = new Set(expandedDirections)
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index)
-    } else {
-      newExpanded.add(index)
-    }
-    setExpandedDirections(newExpanded)
+    setExpandedDirections(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
   }
 
   const handlePlayPause = (key: string, url: string) => {
@@ -493,7 +495,14 @@ export default function TourPlayer() {
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex items-center gap-3">
                         {/* Play/Pause or Spinner */}
-                        {tourData.areaContext.neighborhoodData.intro_audio_status === 'generating' || tourData.areaContext.neighborhoodData.intro_audio_status === 'pending' ? (
+                        {tourData.areaContext.neighborhoodData.intro_audio_url ? (
+                          <button
+                            onClick={() => handlePlayPause("neighborhood-intro", tourData.areaContext!.neighborhoodData!.intro_audio_url!)}
+                            className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
+                          >
+                            {currentlyPlaying === "neighborhood-intro" ? <Pause size={20} /> : <Play size={20} />}
+                          </button>
+                        ) : (
                           <div role="status" className="shrink-0">
                             <svg aria-hidden="true" className="w-11 h-11 text-slate-200 animate-spin fill-[#f36f5e]" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
                               <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
@@ -501,14 +510,7 @@ export default function TourPlayer() {
                             </svg>
                             <span className="sr-only">Loading...</span>
                           </div>
-                        ) : tourData.areaContext.neighborhoodData.intro_audio_url ? (
-                          <button
-                            onClick={() => handlePlayPause("neighborhood-intro", tourData.areaContext!.neighborhoodData!.intro_audio_url!)}
-                            className="w-11 h-11 rounded-full bg-neutral-400 text-white flex items-center justify-center hover:bg-slate-800 transition shrink-0"
-                          >
-                            {currentlyPlaying === "neighborhood-intro" ? <Pause size={20} /> : <Play size={20} />}
-                          </button>
-                        ) : null}
+                        )}
 
                         <div className="flex-1">
                           <h3 className="text-lg font-semibold text-slate-900">
@@ -542,7 +544,7 @@ export default function TourPlayer() {
 
                       {tourData.areaContext.neighborhoodData.intro_script && expandedScripts.has("neighborhood-intro") && (
                         <div className="mt-4 pt-4 border-t border-slate-100">
-                          <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
+                          <div className="p-4 bg-slate-50 rounded-lg text-sm text-slate-700 leading-relaxed">
                             {tourData.areaContext.neighborhoodData.intro_script}
                           </div>
                         </div>
@@ -606,7 +608,7 @@ export default function TourPlayer() {
 
                     {tourData.scripts?.intro && expandedScripts.has("intro") && (
                       <div className="mt-4 pt-4 border-t border-slate-100">
-                        <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
+                        <div className="p-4 bg-slate-50 rounded-lg text-sm text-slate-700 leading-relaxed">
                           {tourData.scripts.intro.content}
                         </div>
                       </div>
@@ -614,44 +616,44 @@ export default function TourPlayer() {
                   </div>
                 </div>
 
-              {/* Walking Directions from Starting Point to First Stop */}
-              {tourData.tour && tourData.tour.stops.length > 0 && tourData.tour.stops[0].walkingDirections && (
-                <div className="my-4 mx-8">
-                  <button
-                    onClick={() => toggleDirections(-1)}
-                    className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
-                  >
-                    <span>{expandedDirections.has(-1) ? '▼' : '▶'}</span>
-                    <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions to the first stop'}</span>
-                  </button>
-                  {expandedDirections.has(-1) && (
-                    <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-lg">🚶</span>
-                        <div>
-                          <p className="text-normal text-emerald-900 font-semibold">
-                            Walking to {tourData.tour.stops[0].name}
-                          </p>
-                          <p className="text-xs text-emerald-700">
-                            {tourData.tour.stops[0].walkingDirections.distance} · {tourData.tour.stops[0].walkingDirections.duration}
-                          </p>
+                {/* Walking Directions from Starting Point to First Stop */}
+                {tourData.tour && tourData.tour.stops.length > 0 && tourData.tour.stops[0].walkingDirections && (
+                  <div className="my-4 mx-8">
+                    <button
+                      onClick={() => toggleDirections(-1)}
+                      className="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1"
+                    >
+                      <span>{expandedDirections.has(-1) ? '▼' : '▶'}</span>
+                      <span>{expandedDirections.has(-1) ? 'hide directions' : 'show walking directions'}</span>
+                    </button>
+                    {expandedDirections.has(-1) && (
+                      <div className="mt-2 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-200/50">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-lg">🚶</span>
+                          <div>
+                            <p className="text-xs text-emerald-900 font-semibold">
+                              Walking to {tourData.tour.stops[0].name}
+                            </p>
+                            <p className="text-[10px] text-emerald-700">
+                              {tourData.tour.stops[0].walkingDirections.distance} · {tourData.tour.stops[0].walkingDirections.duration}
+                            </p>
+                          </div>
                         </div>
+                        <ol className="space-y-2 pl-1">
+                          {tourData.tour.stops[0].walkingDirections.steps.map((step, stepIdx) => (
+                            <li key={stepIdx} className="text-[11px] text-emerald-800 flex gap-2">
+                              <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
+                              <div className="flex-1">
+                                <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
+                                <span className="text-emerald-600 ml-1">({step.distance})</span>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
                       </div>
-                      <ol className="space-y-2 pl-1">
-                        {tourData.tour.stops[0].walkingDirections.steps.map((step, stepIdx) => (
-                          <li key={stepIdx} className="text-xs text-emerald-800 flex gap-2">
-                            <span className="font-semibold text-emerald-600 min-w-[16px]">{stepIdx + 1}.</span>
-                            <div className="flex-1">
-                              <span dangerouslySetInnerHTML={{ __html: step.instruction }} />
-                              <span className="text-emerald-600 ml-1">({step.distance})</span>
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
 
                 {/* Stops */}
                 {tourData.tour?.stops.map((stop, index) => {
@@ -721,7 +723,7 @@ export default function TourPlayer() {
 
                         {script && expandedScripts.has(audioKey) && (
                           <div className="mt-3 pt-3 border-t border-slate-100">
-                            <div className="p-4 bg-slate-50 rounded-lg text-base text-slate-700 leading-relaxed">
+                            <div className="p-4 bg-slate-50 rounded-lg text-sm text-slate-700 leading-relaxed">
                               {script.content}
                             </div>
                           </div>

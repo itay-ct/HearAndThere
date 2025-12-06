@@ -464,7 +464,7 @@ export async function generateToursWithGemini({
   const inputParts = [
     systemPrompt,
     '',
-    `Starting Location: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+    `Starting Location: ${latitude}, ${longitude}`,
    // `Duration: ${durationMinutes} minutes`,
     `Language: ${language || 'english'}`,
   ];
@@ -755,13 +755,26 @@ export async function validateSingleTour(tour, startLatitude, startLongitude) {
       return tour;
     }
 
-    // Update each stop with actual walking time from Google Maps
+    // Update each stop with actual walking time and directions from Google Maps
     const updatedStops = tour.stops.map((stop, i) => {
       const leg = legs[i];
       const actualWalkMinutes = leg.duration?.value ? Math.ceil(leg.duration.value / 60) : stop.walkMinutesFromPrevious;
+
+      // Extract walking directions from the leg
+      const walkingDirections = leg.steps ? {
+        distance: leg.distance?.text || '',
+        duration: leg.duration?.text || '',
+        steps: leg.steps.map(step => ({
+          instruction: step.html_instructions || step.instructions || '',
+          distance: step.distance?.text || '',
+          duration: step.duration?.text || ''
+        }))
+      } : undefined;
+
       return {
         ...stop,
-        walkMinutesFromPrevious: actualWalkMinutes
+        walkMinutesFromPrevious: actualWalkMinutes,
+        walkingDirections
       };
     });
 
