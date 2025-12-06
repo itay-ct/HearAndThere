@@ -8,7 +8,13 @@
 export function createTourState(Annotation, MessagesAnnotation) {
   return Annotation.Root({
     ...MessagesAnnotation.spec,
-    
+
+    // Session ID for cancellation checks
+    sessionId: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => null,
+    }),
+
     // Area context (assembled from multiple nodes)
     areaContext: Annotation({
       reducer: (x, y) => y ?? x,
@@ -41,6 +47,10 @@ export function createTourState(Annotation, MessagesAnnotation) {
     
     // POI data
     pois: Annotation({
+      reducer: (x, y) => y ?? x,
+      default: () => [],
+    }),
+    poiTypeSummary: Annotation({
       reducer: (x, y) => y ?? x,
       default: () => [],
     }),

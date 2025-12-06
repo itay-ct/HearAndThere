@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LocateFixed, MapPinned, MapPinOff, Minus, Plus } from 'lucide-react'
+import { TourSuggestions } from './components/TourSuggestions'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
@@ -53,11 +54,17 @@ function App() {
   const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
   const [selectedVoice, setSelectedVoice] = useState<string>('en-GB-Wavenet-B')
   const [locationDisplayText, setLocationDisplayText] = useState<string>('')
+  const [loadingStatus, setLoadingStatus] = useState<string>('')
+  const [loadingIcon, setLoadingIcon] = useState<string>('')
+  const [showTourSuggestions, setShowTourSuggestions] = useState<boolean>(false)
+  const [interestingMessages, setInterestingMessages] = useState<Array<{ icon: string; message: string }>>([])
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
+  const rotatingMessageIntervalRef = useRef<number | null>(null)
   // Store auto-detected city/neighborhood/country separately so they can be restored
   const savedCityRef = useRef<string | null>(null)
   const savedNeighborhoodRef = useRef<string | null>(null)
@@ -117,6 +124,111 @@ function App() {
     }
   }, [])
 
+  const stopRotatingMessages = useCallback(() => {
+    if (rotatingMessageIntervalRef.current) {
+      window.clearInterval(rotatingMessageIntervalRef.current)
+      rotatingMessageIntervalRef.current = null
+    }
+  }, [])
+
+  // Format POI type into user-friendly message
+  const formatPoiTypeMessage = useCallback((type: string, count: number): string => {
+    // Map common POI types to user-friendly names
+    const typeMap: Record<string, string> = {
+      'museum': 'museums',
+      'park': 'parks',
+      'restaurant': 'restaurants',
+      'cafe': 'cafes',
+      'art_gallery': 'art galleries',
+      'church': 'churches',
+      'synagogue': 'synagogues',
+      'mosque': 'mosques',
+      'shopping_mall': 'shopping malls',
+      'store': 'stores',
+      'tourist_attraction': 'tourist attractions',
+      'library': 'libraries',
+      'university': 'universities',
+      'school': 'schools',
+      'hospital': 'hospitals',
+      'pharmacy': 'pharmacies',
+      'bar': 'bars',
+      'night_club': 'night clubs',
+      'movie_theater': 'movie theaters',
+      'stadium': 'stadiums',
+      'gym': 'gyms',
+      'spa': 'spas',
+      'beauty_salon': 'beauty salons',
+      'book_store': 'book stores',
+      'clothing_store': 'clothing stores',
+      'jewelry_store': 'jewelry stores',
+      'shoe_store': 'shoe stores',
+      'bakery': 'bakeries',
+      'florist': 'florists',
+      'hardware_store': 'hardware stores',
+      'supermarket': 'supermarkets',
+      'convenience_store': 'convenience stores',
+      'gas_station': 'gas stations',
+      'parking': 'parking areas',
+      'train_station': 'train stations',
+      'bus_station': 'bus stations',
+      'airport': 'airports',
+      'subway_station': 'subway stations',
+      'taxi_stand': 'taxi stands',
+      'atm': 'ATMs',
+      'bank': 'banks',
+      'post_office': 'post offices',
+      'city_hall': 'city halls',
+      'courthouse': 'courthouses',
+      'embassy': 'embassies',
+      'fire_station': 'fire stations',
+      'police': 'police stations',
+      'local_government_office': 'government offices',
+      'lodging': 'hotels',
+      'campground': 'campgrounds',
+      'rv_park': 'RV parks',
+      'cemetery': 'cemeteries',
+      'funeral_home': 'funeral homes',
+      'place_of_worship': 'places of worship',
+      'hindu_temple': 'Hindu temples',
+      'buddhist_temple': 'Buddhist temples',
+      'aquarium': 'aquariums',
+      'zoo': 'zoos',
+      'amusement_park': 'amusement parks',
+      'bowling_alley': 'bowling alleys',
+      'casino': 'casinos',
+    }
+
+    const friendlyName = typeMap[type] || type.replace(/_/g, ' ')
+    return `Found ${count} ${friendlyName}`
+  }, [])
+
+  // Start rotating through interesting messages with icons
+  const startRotatingMessages = useCallback((messages: Array<{ icon: string; message: string }>) => {
+    console.log('[RotatingMessages] Starting with messages:', messages)
+    if (messages.length === 0) {
+      console.log('[RotatingMessages] No messages to rotate, exiting')
+      return
+    }
+
+    stopRotatingMessages()
+
+    let currentIndex = 0
+
+    // Set the first message immediately
+    console.log('[RotatingMessages] Setting first message:', messages[0])
+    setLoadingStatus(messages[0].message)
+    setLoadingIcon(messages[0].icon)
+
+    // Then start rotating
+    rotatingMessageIntervalRef.current = window.setInterval(() => {
+      currentIndex = (currentIndex + 1) % messages.length
+      const currentMessage = messages[currentIndex]
+      console.log('[RotatingMessages] Rotating to:', currentMessage)
+      setLoadingStatus(currentMessage.message)
+      setLoadingIcon(currentMessage.icon)
+    }, 4500) // Rotate every 4.5 seconds
+  }, [stopRotatingMessages])
+
   const mapStageToMessage = useCallback(
     (stage: string | null | undefined, tourCount: number | null | undefined) => {
       if (tourCount && tourCount > 0) {
@@ -126,13 +238,13 @@ function App() {
       switch (stage) {
         case 'area_context_built':
         case 'context_collected':
-          return 'Getting to know your area and nearby spots...'
+          return 'Investigating the area...'
         case 'candidates_generated':
-          return 'Brainstorming a few different walking routes...'
+          return 'Generating tour suggestions...'
         case 'tours_ranked':
-          return 'Selecting the best tours for you...'
+          return 'Finalizing your tours...'
         default:
-          return 'Saving your location and preferences...'
+          return 'Looking what\'s around...'
       }
     },
     [],
@@ -158,14 +270,34 @@ function App() {
           }
 
           const progress = await res.json()
+          console.log('[Progress] Received:', progress)
           const nextMessage = mapStageToMessage(progress.stage, progress.tourCount)
           setMessage(nextMessage)
+
+          // If we have interesting messages and tours aren't ready yet, start rotating messages
+          const toursReady = progress.tourCount && progress.tourCount > 0
+          const hasMessages = progress.interestingMessages && progress.interestingMessages.length > 0
+
+          console.log('[Progress] toursReady:', toursReady, 'hasMessages:', hasMessages, 'interestingMessages:', progress.interestingMessages)
+
+          if (hasMessages && !toursReady) {
+            setInterestingMessages(progress.interestingMessages)
+            // Only start rotating if not already rotating
+            if (!rotatingMessageIntervalRef.current) {
+              console.log('[Progress] Starting rotating messages with:', progress.interestingMessages)
+              startRotatingMessages(progress.interestingMessages)
+            }
+          } else {
+            // Stop rotating messages when we move to other stages or tours are ready
+            stopRotatingMessages()
+            setLoadingStatus(nextMessage)
+          }
         } catch (err) {
           console.error('Progress polling failed:', err)
         }
       }, 1000)
     },
-    [mapStageToMessage, stopProgressPolling],
+    [mapStageToMessage, stopProgressPolling, startRotatingMessages, stopRotatingMessages],
   )
 
 
@@ -414,7 +546,13 @@ function App() {
 
     setSessionId(clientSessionId)
     setMessage('Saving your location and preferences...')
+    setLoadingStatus('Looking what\'s around...')
+    setShowTourSuggestions(true) // Show tour suggestions component immediately
     startProgressPolling(clientSessionId)
+
+    // Create AbortController for cancellation
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
 
     try {
       const apiUrl = `${API_BASE_URL}/api/session`
@@ -458,6 +596,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: abortController.signal,
       })
 
       console.log('Response status:', response.status)
@@ -475,6 +614,7 @@ function App() {
       const hasTours = Array.isArray(data.tours) && data.tours.length > 0
 
       stopProgressPolling()
+      stopRotatingMessages()
 
       setStatus('success')
       setSessionId(data.sessionId ?? clientSessionId)
@@ -490,6 +630,16 @@ function App() {
       )
     } catch (error) {
       stopProgressPolling()
+      stopRotatingMessages()
+      abortControllerRef.current = null
+
+      // Check if this was a user-initiated cancellation
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Tour generation cancelled by user')
+        setStatus('idle')
+        setMessage('')
+        return
+      }
 
       console.error('=== API ERROR DEBUG ===')
       console.error('Error type:', error instanceof Error ? error.constructor.name : typeof error)
@@ -510,6 +660,45 @@ function App() {
       setMessage(`API Error: ${debugMessage}`)
     }
   }
+
+  const handleCancelTourGeneration = useCallback(async () => {
+    console.log('Cancelling tour generation...')
+
+    // Abort the ongoing fetch request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+
+    // Stop progress polling and rotating messages
+    stopProgressPolling()
+    stopRotatingMessages()
+
+    // If we have a sessionId, try to cancel the backend processing
+    if (sessionId) {
+      try {
+        await fetch(`${API_BASE_URL}/api/session/${sessionId}/cancel`, {
+          method: 'POST',
+        })
+        console.log('Backend cancellation request sent')
+      } catch (error) {
+        console.error('Failed to send cancellation to backend:', error)
+        // Continue with frontend cleanup even if backend cancellation fails
+      }
+    }
+
+    // Reset state
+    setShowTourSuggestions(false)
+    setToursGenerated(false)
+    setTours([])
+    setSelectedTour(null)
+    setSelectedTourId(null)
+    setMessage('')
+    setLoadingStatus('')
+    setLoadingIcon('')
+    setInterestingMessages([])
+    setStatus('idle')
+  }, [sessionId, stopProgressPolling, stopRotatingMessages])
 
   const handleSelectTour = useCallback(async (tour: Tour) => {
     setSelectedTourId(tour.id)
@@ -993,114 +1182,40 @@ function App() {
                   disabled={!canSubmit || status === 'saving'}
                   className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {status === 'saving' ? 'Saving session…' : 'Propose Tours'}
+                  {status === 'saving' ? 'Generating tours…' : 'Propose Tours'}
                 </button>
               </div>
             </form>
           </div>
 
-        {/* STEP 1.5: Tour Generation Loading */}
-        {status === 'saving' && !toursGenerated && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-6">
-              <h3 className="text-sm font-semibold text-sky-900 mb-4">
-                🗺️ Generating Tours
-              </h3>
-              <p className="text-xs text-sky-700 mb-4">
-                Creating personalized walking tours for you. This usually takes up to 60 seconds...
-              </p>
-              <div className="flex items-center gap-3 text-xs">
-                <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-sky-700">Analyzing area and generating tours...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 2: Tour Selection */}
-        {toursGenerated && tours.length > 0 && (
-          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
-            <button
-                type="button"
-                onClick={() => {
-                  setToursGenerated(false);
-                  setTours([]);
-                  setSelectedTour(null);
-                  setSelectedTourId(null);
-                  setMessage(''); // Clear message when going back
-                }}
-                className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
-              >
-                <span>←</span>
-                <span>Go Back</span>
-              </button>
-            <header className="mb-6 text-center">
-              
-              <h1 className="text-3xl font-semibold text-slate-900 mb-2">
-                Choose Your Tour
-              </h1>
-              <p className="text-sm text-slate-600">
-                {neighborhood || city
-                  ? `Starting near ${neighborhood || city}.`
-                  : 'Here are a few routes we prepared for you.'}
-              </p>
-            </header>
-
-            <div className="space-y-4">
-              
-                <div className="-mx-4 overflow-x-auto pb-2">
-                  <div className="flex gap-4 px-1">
-                    {tours.map((tour) => (
-                      <article
-                        key={tour.id}
-                        className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 bg-white/90 ${
-                          selectedTourId === tour.id
-                            ? 'border-[#f36f5e] ring-1 ring-[#f36f5e]/40'
-                            : 'border-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="flex-1">
-                            <h2 className="text-sm font-semibold text-slate-900">{tour.title}</h2>
-                          </div>
-
-                         <span className="inline-flex items-center justify-center text-center w-24 rounded-2xl border border-sky-200 bg-sky-50 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-tight text-sky-700">
-                           {tour.theme}
-                         </span>
-                        </div>
-
-                        <p className="mt-1 text-xs text-slate-600">{tour.abstract}</p>
-                        <p className="mb-3 text-[11px] text-slate-500">
-                          ⏱️ ~{tour.estimatedTotalMinutes} min · {tour.stops.length} stops
-                        </p>
-
-                        <ol className="mb-3 space-y-1 text-[11px] text-slate-600">
-                          {tour.stops.map((stop, idx) => (
-                            <li key={`${tour.id}-stop-${idx}`} className="flex gap-2">
-                              <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                              <span className="flex-1">
-                                {stop.name}{' '}
-                                <span className="text-slate-400">
-                                  · walk {stop.walkMinutesFromPrevious} min · dwell {stop.dwellMinutes} min
-                                </span>
-                              </span>
-                            </li>
-                          ))}
-                        </ol>
-
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTour(tour)}
-                          className="inline-flex w-full items-center justify-center rounded-xl bg-[#f36f5e] px-3 py-2 text-xs font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-                        >
-                          {selectedTourId === tour.id ? 'Selected' : 'Select this tour'}
-                        </button>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-
-            </div>
+        {/* STEP 2: Tour Suggestions (with lazy loading) */}
+        {showTourSuggestions && !selectedTour && (
+          <div className={`transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
+            <TourSuggestions
+              tours={tours}
+              selectedTourId={selectedTourId}
+              onSelectTour={handleSelectTour}
+              onGoBack={async () => {
+                // If still loading, cancel the request
+                if (status === 'saving' && tours.length === 0) {
+                  await handleCancelTourGeneration()
+                } else {
+                  // Otherwise just go back
+                  setShowTourSuggestions(false)
+                  setToursGenerated(false)
+                  setTours([])
+                  setSelectedTour(null)
+                  setSelectedTourId(null)
+                  setMessage('')
+                  setLoadingStatus('')
+                }
+              }}
+              neighborhood={neighborhood}
+              city={city}
+              isLoading={status === 'saving' && tours.length === 0}
+              loadingStatus={loadingStatus}
+              loadingIcon={loadingIcon}
+            />
           </div>
         )}
 

@@ -6,6 +6,7 @@
  */
 
 import { traceable } from "langsmith/traceable";
+import { checkCancellation } from './cancellationHelper.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -182,7 +183,9 @@ export async function generateToursWithGemini({
   pois,
   cityData,
   neighborhoodData,
-  foodPois = []
+  foodPois = [],
+  sessionId = null,
+  redisClient = null
 }) {
   const fallback = () =>
     heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
@@ -327,6 +330,9 @@ export async function generateToursWithGemini({
     poiCount: allPois.length,
   });
 
+  // Check for cancellation before expensive Gemini call
+  await checkCancellation(sessionId, redisClient, 'generateToursWithGemini');
+
   // Wrap Gemini call with traceable for LangSmith observability
   const generateToursTraceable = traceable(
     async (promptText) => {
@@ -364,7 +370,26 @@ export async function generateToursWithGemini({
   );
 
   try {
-    const text = await generateToursTraceable(prompt);
+    // Race the Gemini call against periodic cancellation checks
+    // This allows us to interrupt even during the Gemini API call
+    const geminiCallPromise = generateToursTraceable(prompt);
+
+    // Create a cancellation checker that polls every 500ms
+    const cancellationPromise = new Promise((_, reject) => {
+      const checkInterval = setInterval(async () => {
+        try {
+          await checkCancellation(sessionId, redisClient, 'generateToursWithGemini');
+        } catch (err) {
+          clearInterval(checkInterval);
+          reject(err);
+        }
+      }, 500);
+
+      // Clean up interval when Gemini call completes
+      geminiCallPromise.finally(() => clearInterval(checkInterval));
+    });
+
+    const text = await Promise.race([geminiCallPromise, cancellationPromise]);
 
     let parsed;
     try {

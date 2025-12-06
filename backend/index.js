@@ -211,6 +211,7 @@ async function start() {
         tours = Array.isArray(result.tours) ? result.tours : [];
         cityData = result.cityData || null;
         neighborhoodData = result.neighborhoodData || null;
+        const interestingMessages = result.interestingMessages || [];
 
         const extraFields = {};
         if (city) extraFields.city = city;
@@ -218,6 +219,7 @@ async function start() {
         if (tours.length) extraFields.tours = JSON.stringify(tours);
         if (cityData) extraFields.cityData = JSON.stringify(cityData);
         if (neighborhoodData) extraFields.neighborhoodData = JSON.stringify(neighborhoodData);
+        if (interestingMessages.length) extraFields.interestingMessages = JSON.stringify(interestingMessages);
 
         if (Object.keys(extraFields).length > 0) {
           await redisClient.hSet(key, extraFields);
@@ -232,6 +234,15 @@ async function start() {
         });
       } catch (err) {
         console.error('[api/session] Error generating tours:', err);
+
+        // Check if this is a cancellation
+        if (err.message === 'CANCELLED') {
+          console.log('[api/session] Tour generation cancelled by user');
+          return res.status(499).json({
+            error: 'cancelled',
+            message: 'Tour generation cancelled by user'
+          });
+        }
 
         // Check if this is a "no POIs" error
         if (err.message && err.message.includes('No points of interest detected')) {
@@ -287,17 +298,62 @@ async function start() {
         }
       }
 
+      let interestingMessages = [];
+      if (data.interestingMessages) {
+        try {
+          const parsed = JSON.parse(data.interestingMessages);
+          if (Array.isArray(parsed)) {
+            interestingMessages = parsed;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       res.json({
         sessionId,
         stage: data.stage || null,
         city: data.city || null,
         neighborhood: data.neighborhood || null,
         tourCount,
+        interestingMessages,
         status: tourCount > 0 ? 'tours-ready' : 'in-progress',
       });
     } catch (err) {
       console.error('Error reading session progress', err);
       res.status(500).json({ error: 'failed-to-read-session-progress' });
+    }
+  });
+
+  // Cancel tour generation for a session
+  app.post('/api/session/:sessionId/cancel', async (req, res) => {
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+
+    console.log('[api/session/cancel] Cancellation requested for session:', sessionId);
+
+    const key = `session:${sessionId}`;
+
+    try {
+      // Mark session as cancelled in Redis
+      await redisClient.hSet(key, {
+        cancelled: 'true',
+        cancelledAt: String(Date.now())
+      });
+
+      console.log('[api/session/cancel] Session marked as cancelled:', sessionId);
+
+      res.json({
+        sessionId,
+        status: 'cancelled',
+        message: 'Tour generation cancelled'
+      });
+    } catch (err) {
+      console.error('[api/session/cancel] Error cancelling session:', err);
+      res.status(500).json({ error: 'failed-to-cancel-session' });
     }
   });
 

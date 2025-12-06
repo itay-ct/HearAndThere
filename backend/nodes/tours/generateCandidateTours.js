@@ -7,6 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { generateToursWithGemini } from '../../utils/tourHelpers.js';
 import { queryFoodPoisFromRedis } from '../../utils/poiHelpers.js';
+import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
@@ -42,9 +43,10 @@ export function createGenerateCandidateToursNode({
   language,
   redisClient
 }) {
-  return async (state) => {
+  return async (state, config) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
     const areaContext = state.areaContext;
+    const sessionId = config?.configurable?.thread_id;
 
     if (!areaContext) {
       throw new Error('Area context not available in state');
@@ -81,6 +83,9 @@ export function createGenerateCandidateToursNode({
         poiCount
       });
 
+      // Check for cancellation before expensive operations
+      await checkCancellation(sessionId, redisClient, 'generateCandidateTours');
+
       // Query food POIs if tour is 2 hours or longer
       let foodPois = [];
       if (durationMinutes >= 120 && redisClient) {
@@ -102,6 +107,9 @@ export function createGenerateCandidateToursNode({
         }
       }
 
+      // Check for cancellation again before calling Gemini (expensive operation)
+      await checkCancellation(sessionId, redisClient, 'generateCandidateTours');
+
       // Generate tours using Gemini LLM
       const rawTours = await generateToursWithGemini({
         latitude,
@@ -115,6 +123,8 @@ export function createGenerateCandidateToursNode({
         cityData: areaContext.cityData,
         neighborhoodData: areaContext.neighborhoodData,
         foodPois: foodPois,
+        sessionId, // Pass sessionId for cancellation checks
+        redisClient, // Pass redisClient for cancellation checks
       });
 
       console.log('[generateCandidateTours] Generated tours count:', Array.isArray(rawTours) ? rawTours.length : 0);

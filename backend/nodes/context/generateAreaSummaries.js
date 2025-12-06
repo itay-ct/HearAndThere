@@ -5,6 +5,7 @@
  */
 
 import { generateCitySummary, generateNeighborhoodSummary } from '../../utils/geocodingHelpers.js';
+import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
@@ -31,10 +32,14 @@ export function createGenerateAreaSummariesNode({ redisClient }) {
     const country = state.country || null;
     const city = state.city || null;
     const neighborhood = state.neighborhood || null;
+    const sessionId = getSessionIdFromState(state);
 
     try {
       console.log('[generateAreaSummaries] Generating area summaries...');
       debugLog('Generating summaries for', { country, city, neighborhood });
+
+      // Check for cancellation before expensive LLM operations
+      await checkCancellation(sessionId, redisClient, 'generateAreaSummaries');
 
       // Generate city and neighborhood summaries in parallel (with caching)
       // Use hierarchical cache keys: country:city and country:city:neighborhood

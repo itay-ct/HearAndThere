@@ -5,6 +5,7 @@
  */
 
 import { validateWalkingTimes } from '../../utils/tourHelpers.js';
+import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
@@ -32,6 +33,7 @@ export function createValidateWalkingTimesNode({ latitude, longitude, durationMi
   return async (state) => {
     const messages = Array.isArray(state.messages) ? state.messages : [];
     const tours = state.candidateTours || [];
+    const sessionId = getSessionIdFromState(state);
 
     if (!tours.length) {
       console.warn('[validateWalkingTimesNode] No tours to validate walking times for');
@@ -41,6 +43,9 @@ export function createValidateWalkingTimesNode({ latitude, longitude, durationMi
     try {
       console.log('[validateWalkingTimesNode] Validating', tours.length, 'tours...');
       debugLog('Validating tours with Google Maps Directions API');
+
+      // Check for cancellation before expensive Google Maps API calls
+      await checkCancellation(sessionId, redisClient, 'validateWalkingTimes');
 
       // Validate walking times using Google Maps Directions API
       const validatedTours = await validateWalkingTimes(tours, latitude, longitude, redisClient);

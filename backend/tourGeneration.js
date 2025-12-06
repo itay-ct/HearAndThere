@@ -123,7 +123,10 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     redisClient
   });
 
-  const assembleAreaContextNode = createAssembleAreaContextNode();
+  const assembleAreaContextNode = createAssembleAreaContextNode({
+    sessionId,
+    redisClient
+  });
 
   const generateCandidatesNode = createGenerateCandidateToursNode({
     latitude,
@@ -243,10 +246,34 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
   return compiledGraph;
 }
 
+/**
+ * Check if a session has been cancelled
+ */
+async function isSessionCancelled(sessionId, redisClient) {
+  if (!sessionId || !redisClient) {
+    return false;
+  }
+
+  try {
+    const key = `session:${sessionId}`;
+    const cancelled = await redisClient.hGet(key, 'cancelled');
+    return cancelled === 'true';
+  } catch (err) {
+    console.error('[tourGeneration] Error checking cancellation status:', err);
+    return false;
+  }
+}
+
 // Main export function - generates tours using LangGraph workflow
 export async function generateTours({ sessionId, latitude, longitude, durationMinutes, customization, language, city: providedCity, neighborhood: providedNeighborhood, country: providedCountry, redisClient }) {
   if (!redisClient) {
     throw new Error('Redis client is required for tour generation');
+  }
+
+  // Check if session was cancelled before starting
+  if (await isSessionCancelled(sessionId, redisClient)) {
+    console.log('[tourGeneration] Session cancelled before starting:', sessionId);
+    throw new Error('CANCELLED');
   }
 
   const graph = await buildTourGraph({
@@ -267,15 +294,41 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   // Initialize state with provided city/neighborhood/country if available
   const initialState = {
     messages: [],
+    sessionId, // Pass sessionId to state so nodes can check cancellation
     ...(providedCity && { city: providedCity }),
     ...(providedNeighborhood && { neighborhood: providedNeighborhood }),
     ...(providedCountry && { country: providedCountry })
   };
 
-  const finalState = await graph.invoke(
-    initialState,
-    config
-  );
+  // Check for cancellation before invoking graph
+  if (await isSessionCancelled(sessionId, redisClient)) {
+    console.log('[tourGeneration] Session cancelled before graph invocation:', sessionId);
+    throw new Error('CANCELLED');
+  }
+
+  // Create a promise that rejects if session is cancelled
+  const cancellationCheckInterval = setInterval(async () => {
+    if (await isSessionCancelled(sessionId, redisClient)) {
+      console.log('[tourGeneration] ⚠️ Session cancelled during graph execution:', sessionId);
+      clearInterval(cancellationCheckInterval);
+    }
+  }, 500); // Check every 500ms
+
+  let finalState;
+  try {
+    finalState = await graph.invoke(
+      initialState,
+      config
+    );
+  } finally {
+    clearInterval(cancellationCheckInterval);
+  }
+
+  // Check for cancellation after graph completes
+  if (await isSessionCancelled(sessionId, redisClient)) {
+    console.log('[tourGeneration] Session cancelled after graph completion:', sessionId);
+    throw new Error('CANCELLED');
+  }
 
   // Check if tour generation failed due to no POIs
   if (finalState.error === 'no_pois_available') {
@@ -290,6 +343,7 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
   const tours = finalState.finalTours || [];
   const cityData = finalState.cityData || { summary: null, keyFacts: null };
   const neighborhoodData = finalState.neighborhoodData || { summary: null, keyFacts: null };
+  const poiTypeSummary = finalState.poiTypeSummary || [];
 
   // Fire off cache operations asynchronously (don't await)
   // This allows the user to receive their response immediately while caching happens in the background
@@ -312,6 +366,7 @@ export async function generateTours({ sessionId, latitude, longitude, durationMi
     tours,
     cityData,
     neighborhoodData,
+    poiTypeSummary,
   };
 }
 
