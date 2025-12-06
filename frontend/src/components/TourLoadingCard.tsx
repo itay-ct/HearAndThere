@@ -18,7 +18,14 @@ export function TourLoadingCard({ tourNumber, interestingMessage }: TourLoadingC
 
     // Get the icon from lucide-react
     const IconComponent = (LucideIcons as any)[pascalCase]
-    return IconComponent || null
+
+    // If icon not found, use default
+    if (!IconComponent) {
+      console.warn(`[TourLoadingCard] Icon "${iconName}" (${pascalCase}) not found in Lucide, using ArrowDownToDot`)
+      return (LucideIcons as any)['ArrowDownToDot'] || null
+    }
+
+    return IconComponent
   }
 
   const IconComponent = interestingMessage ? getIconComponent(interestingMessage.icon) : null

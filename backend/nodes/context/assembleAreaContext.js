@@ -87,14 +87,32 @@ ${poiList}`;
 
     console.log('[assembleAreaContext] Generated messages:', text);
 
+    const defaultIcon = 'map-pin-check-inside';
+
     // Parse the response - each line should be "icon: message"
     const lines = text.split('\n').filter(line => line.trim() && line.includes(':'));
     const messages = lines.slice(0, 7).map(line => {
       const colonIndex = line.indexOf(':');
       if (colonIndex === -1) return null;
 
-      const icon = line.substring(0, colonIndex).trim();
-      const message = line.substring(colonIndex + 1).trim();
+      let icon = line.substring(0, colonIndex).trim().toLowerCase();
+      let message = line.substring(colonIndex + 1).trim();
+
+      // Validate icon format (should be kebab-case, alphanumeric + hyphens only)
+      // If invalid format, use default icon
+      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(icon)) {
+        console.warn(`[assembleAreaContext] Invalid icon format "${icon}", using default "${defaultIcon}"`);
+        icon = defaultIcon;
+      }
+
+      // Clean message - remove emojis and special characters, keep only text
+      // Keep only letters, numbers, punctuation, and spaces
+      message = message.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, '');
+
+      // Normalize whitespace
+      message = message.replace(/\s+/g, ' ').trim();
+
+      if (!message) return null;
 
       return { icon, message };
     }).filter(Boolean);
