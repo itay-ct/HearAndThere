@@ -7,6 +7,7 @@ import { createPreloadLocationSummariesNode } from './nodes/audioguide/preloadLo
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_AUDIOGUIDE_MODEL = process.env.GEMINI_AUDIOGUIDE_MODEL || 'gemini-3-pro-preview';
+const ENGLISH_VOICE = process.env.ENGLISH_VOICE || 'en-GB-Wavenet-B';
 const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'itaytevel-hearandthere';
 
 // Google Cloud Service Account credentials
@@ -844,7 +845,7 @@ export async function generateAudioguide({ sessionId, tourId, selectedTour, area
       selectedTour,
       areaContext,
       language: language || 'english',
-      voice: voice || (language === 'hebrew' ? 'he-IL-Standard-D' : 'en-GB-Wavenet-B'),
+      voice: voice || (language === 'hebrew' ? 'he-IL-Standard-D' : ENGLISH_VOICE),
     },
     config
   );
@@ -875,7 +876,7 @@ export async function generateNeighborhoodIntroAudio({ introScript, outputFileNa
   });
 
   // Determine voice if not provided
-  const selectedVoice = voice || (language === 'hebrew' ? 'he-IL-Standard-D' : 'en-GB-Wavenet-B');
+  const selectedVoice = voice || (language === 'hebrew' ? 'he-IL-Standard-D' : ENGLISH_VOICE);
 
   // Use the same synthesizeAudio function
   const audioUrl = await synthesizeAudio({

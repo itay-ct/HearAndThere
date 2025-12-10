@@ -8,6 +8,7 @@
 import { traceable } from "langsmith/traceable";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const INTERESTING_MESSAGES_MODEL = process.env.INTERESTING_MESSAGES_MODEL || 'gemini-2.0-flash-lite';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 let geminiFlashLiteModelPromise;
@@ -22,10 +23,10 @@ async function getGeminiFlashLiteModel() {
       .then((mod) => {
         const { GoogleGenerativeAI } = mod;
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        return genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+        return genAI.getGenerativeModel({ model: INTERESTING_MESSAGES_MODEL });
       })
       .catch((err) => {
-        console.error('[assembleAreaContext] Failed to load Gemini Flash Lite model:', err);
+        console.error('[assembleAreaContext] Failed to load Gemini model for interesting messages:', err);
         return null;
       });
   }

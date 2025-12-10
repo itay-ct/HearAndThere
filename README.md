@@ -104,8 +104,12 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 GCS_BUCKET_NAME=your-bucket-name
 
 # AI Models
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL_TOUR_GENERATION=gemini-2.5-flash
 GEMINI_AUDIOGUIDE_MODEL=gemini-3-pro-preview
+INTERESTING_MESSAGES_MODEL=gemini-2.0-flash-lite
+
+# TTS Voice
+ENGLISH_VOICE=en-GB-Wavenet-B
 
 # LangSmith (optional)
 LANGCHAIN_TRACING_V2=true
@@ -119,6 +123,7 @@ PORT=4000
 **Frontend (.env)**
 ```env
 VITE_GOOGLE_MAPS_API_KEY=your_maps_api_key
+VITE_ENGLISH_VOICE=en-GB-Wavenet-B
 ```
 
 ### Run Both Services

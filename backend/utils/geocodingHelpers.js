@@ -21,7 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const LOCATIONIQ_API_KEY = process.env.LOCATIONIQ_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL_TOUR_GENERATION || 'gemini-2.5-flash';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 function debugLog(...args) {

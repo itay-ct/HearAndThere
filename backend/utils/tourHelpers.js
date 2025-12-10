@@ -9,7 +9,7 @@ import { traceable } from "langsmith/traceable";
 import { checkCancellation } from './cancellationHelper.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL_TOUR_GENERATION || 'gemini-2.5-flash';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 function debugLog(...args) {

@@ -6,6 +6,7 @@ const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
   : 'http://localhost:4000';
 
+const ENGLISH_VOICE = import.meta.env.VITE_ENGLISH_VOICE || 'en-GB-Wavenet-B';
 const FRONTEND_VERSION = __APP_VERSION__; // Injected from package.json by Vite
 
 type TourStop = {
@@ -52,7 +53,7 @@ function App() {
   const [shareableTourId, setShareableTourId] = useState<string | null>(null)
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
   const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
-  const [selectedVoice, setSelectedVoice] = useState<string>('en-GB-Wavenet-B')
+  const [selectedVoice, setSelectedVoice] = useState<string>(ENGLISH_VOICE)
   const [locationDisplayText, setLocationDisplayText] = useState<string>('')
   const [loadingStatus, setLoadingStatus] = useState<string>('')
   const [loadingIcon, setLoadingIcon] = useState<string>('')
@@ -1362,7 +1363,7 @@ function App() {
                       </>
                     ) : (
                       <>
-                        <option value="en-GB-Wavenet-B">English (UK) - Wavenet (Default)</option>
+                        <option value={ENGLISH_VOICE}>English (UK) - Wavenet (Default)</option>
                         <option value="en-US-Chirp3-HD-Algenib">English (US) - Chirp3 HD</option>
                       </>
                     )}
