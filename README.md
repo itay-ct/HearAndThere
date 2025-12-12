@@ -106,7 +106,7 @@ GCS_BUCKET_NAME=your-bucket-name
 # AI Models
 GEMINI_MODEL_TOUR_GENERATION=gemini-2.5-flash
 GEMINI_AUDIOGUIDE_MODEL=gemini-3-pro-preview
-INTERESTING_MESSAGES_MODEL=gemini-2.0-flash-lite
+INTERESTING_MESSAGES_MODEL=gemini-2.5-flash-lite
 
 # TTS Voice
 ENGLISH_VOICE=en-GB-Wavenet-B

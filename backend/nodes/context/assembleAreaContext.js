@@ -8,8 +8,13 @@
 import { traceable } from "langsmith/traceable";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const INTERESTING_MESSAGES_MODEL = process.env.INTERESTING_MESSAGES_MODEL || 'gemini-2.0-flash-lite';
+const INTERESTING_MESSAGES_MODEL = process.env.INTERESTING_MESSAGES_MODEL || 'gemini-2.5-flash-lite';
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
+
+const DEFAULT_ICON = 'map-pin-check-inside';
+const ICON_INDEX_NAME = 'lucide_icon_index';
+
+let embeddingModel = null;
 
 let geminiFlashLiteModelPromise;
 async function getGeminiFlashLiteModel() {
@@ -41,11 +46,64 @@ function debugLog(...args) {
 }
 
 /**
+ * Search for the best matching Lucide icon using Redis vector search
+ * @param {string} message - The message to find an icon for
+ * @param {Object} redisClient - Redis client instance
+ * @returns {Promise<string>} Icon name (kebab-case)
+ */
+async function searchBestIcon(message, redisClient) {
+  if (!message || !message.trim()) {
+    return DEFAULT_ICON;
+  }
+
+  if (!redisClient) {
+    console.warn('[assembleAreaContext] No Redis client available for icon search');
+    return DEFAULT_ICON;
+  }
+
+  try {
+    // Lazy load embedding model
+    if (!embeddingModel) {
+      const { pipeline } = await import('@xenova/transformers');
+      embeddingModel = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    }
+
+    // Generate embedding for the message
+    const output = await embeddingModel(message, { pooling: 'mean', normalize: true });
+    const embedding = Array.from(output.data);
+    const embeddingBuffer = Buffer.from(new Float32Array(embedding).buffer);
+
+    // Search for nearest icon in Redis
+    const searchResults = await redisClient.ft.search(
+      ICON_INDEX_NAME,
+      `*=>[KNN 1 @embedding $vector AS score]`,
+      {
+        PARAMS: { vector: embeddingBuffer },
+        RETURN: ['name', 'score'],
+        SORTBY: 'score',
+        DIALECT: 2
+      }
+    );
+
+    if (searchResults.total > 0 && searchResults.documents.length > 0) {
+      const iconName = searchResults.documents[0].value.name;
+      console.log(`[assembleAreaContext] Found icon "${iconName}" for message: "${message}"`);
+      return iconName;
+    }
+  } catch (err) {
+    console.error('[assembleAreaContext] Icon search failed:', err.message);
+  }
+
+  return DEFAULT_ICON;
+}
+
+/**
  * Generate interesting messages about POIs using Gemini Flash Lite
  * @param {Array} pois - Array of POI objects
+ * @param {Object} redisClient - Redis client for icon search
  * @returns {Promise<Array>} Array of {icon, message} objects
  */
-async function generateInterestingMessages(pois) {
+async function generateInterestingMessages(pois, redisClient) {
   if (!pois || pois.length === 0) {
     return [];
   }
@@ -65,9 +123,7 @@ async function generateInterestingMessages(pois) {
       return `${poi.name} (${types || 'general'})`;
     }).join('\n');
 
-    const prompt = `Generate 7 interesting aggregative short 1-sentences about this places list (around 8 words). These should entertain the user while he waits for tours to generate. Aggregate them by their types and specify how many places, such as "found 7 great local restaurants around you". Answer ONLY with the 7 lines. for each line add 1 unique icon from this list only
-[utensils, pizza, ice-cream, coffee, cup-soda, beer, wine, egg-fried, drumstick, salad, cake, sandwich, egg, tree, trees, flower, mountain, sprout, leaf, tent, shopping-bag, shopping-cart, store, building, building-2, warehouse, factory, film, film-reel, clapperboard, tv, music, ticket, map-pin, map-pinned, pin, pointer, navigation, navigation-2, locate, locate-fixed, flag, flag-triangle-left, flag-triangle-right, camera, camera-off, binoculars, landmark, museum, hotel]
-output the icon name and then colon and then the sentence (sentence ONLY text characters, no icons).
+    const prompt = `Generate 7 interesting aggregative short 1-sentences about this places list (around 8 words). These should entertain the user while he waits for tours to generate. Aggregate them by their types and specify how many places, such as "found 7 great local restaurants around you". Answer ONLY with the 7 lines, one per line.
 List of places and their types:
 ${poiList}`;
 
@@ -88,37 +144,32 @@ ${poiList}`;
 
     console.log('[assembleAreaContext] Generated messages:', text);
 
-    const defaultIcon = 'map-pin-check-inside';
+    // Parse the response - each line is a message
+    const lines = text.split('\n').filter(line => line.trim());
 
-    // Parse the response - each line should be "icon: message"
-    const lines = text.split('\n').filter(line => line.trim() && line.includes(':'));
-    const messages = lines.slice(0, 7).map(line => {
-      const colonIndex = line.indexOf(':');
-      if (colonIndex === -1) return null;
-
-      let icon = line.substring(0, colonIndex).trim().toLowerCase();
-      let message = line.substring(colonIndex + 1).trim();
-
-      // Validate icon format (should be kebab-case, alphanumeric + hyphens only)
-      // If invalid format, use default icon
-      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(icon)) {
-        console.warn(`[assembleAreaContext] Invalid icon format "${icon}", using default "${defaultIcon}"`);
-        icon = defaultIcon;
-      }
-
+    // Process messages in parallel to find best icons
+    const messagesPromises = lines.slice(0, 7).map(async (line) => {
       // Clean message - remove emojis and special characters, keep only text
       // Keep only letters, numbers, punctuation, and spaces
-      message = message.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, '');
+      let message = line.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, '');
 
       // Normalize whitespace
       message = message.replace(/\s+/g, ' ').trim();
 
       if (!message) return null;
 
-      return { icon, message };
-    }).filter(Boolean);
+      // Search for best matching icon using vector search
+      const icon = await searchBestIcon(message, redisClient);
 
-    console.log('[assembleAreaContext] Parsed messages:', messages);
+      console.log(`best icon: ${icon} for message: ${message}`);
+      debugLog('best icon:', icon, 'for message:', message);
+      
+      return { icon, message };
+    });
+
+    const messages = (await Promise.all(messagesPromises)).filter(Boolean);
+
+    console.log('[assembleAreaContext] Parsed messages with icons:', messages);
     return messages;
   } catch (err) {
     console.error('[assembleAreaContext] Failed to generate interesting messages:', err);
@@ -159,7 +210,7 @@ export function createAssembleAreaContextNode({ sessionId, redisClient }) {
       });
 
       // Generate interesting messages in parallel (don't wait for it)
-      const interestingMessagesPromise = generateInterestingMessages(pois);
+      const interestingMessagesPromise = generateInterestingMessages(pois, redisClient);
 
       const areaContext = {
         country: country || null,
