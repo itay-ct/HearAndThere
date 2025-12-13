@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" fill="none">
-  <!-- Transparent background by default -->
+  <!-- Transparent background -->
 
   <!-- ICON -->
   <g transform="translate(70,55)">
-    <!-- Location pin (slimmer) -->
+    <!-- Location pin -->
     <path
       d="M160 15
          C106 15 64 56 64 110
@@ -16,9 +16,8 @@
     <!-- Inner circle -->
     <circle cx="160" cy="110" r="56" fill="#FFFFFF"/>
 
-    <!-- Audio bars (thicker, centered) -->
+    <!-- Audio bars -->
     <g fill="#000000" transform="translate(160,110)">
-      <!-- Each bar is centered around x=0 using negative x offsets -->
       <rect x="-38" y="-16" width="10" height="32" rx="5"/>
       <rect x="-22" y="-24" width="10" height="48" rx="5"/>
       <rect x="-6"  y="-30" width="12" height="60" rx="6"/>
@@ -27,10 +26,16 @@
     </g>
   </g>
 
-  <!-- TEXT -->
-  <g fill="#000000" font-family="Satoshi, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-weight="900">
-    <!-- Reduced gap: text starts closer to the pin -->
-    <text x="360" y="150" font-size="96" letter-spacing="0.14em">HEAR</text>
-    <text x="360" y="238" font-size="62" letter-spacing="0.14em">&amp; THERE</text>
+  <!-- TEXT (vertically centered relative to pin) -->
+  <g
+    fill="#000000"
+    font-family="Satoshi, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+    font-weight="900"
+    letter-spacing="0.14em"
+    dominant-baseline="middle"
+  >
+    <!-- Centered on pin vertical center: 55 + 110 = 165 -->
+    <text x="360" y="165" font-size="80">HEAR</text>
+    <text x="360" y="245" font-size="80">&amp; THERE</text>
   </g>
 </svg>

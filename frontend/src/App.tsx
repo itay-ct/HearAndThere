@@ -1065,19 +1065,18 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10 relative">
-      {/* Logo in top left corner */}
-      <div className="absolute top-4 left-4 z-10">
-        <img 
-          src={logo} 
-          alt="Hear & There" 
-          className="h-12 w-auto"
-        />
-      </div>
+    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
          <header className="mb-8 text-center">
-          <h1 className="text-xs font-semibold text-slate-900 mb-2">Discover what's around you</h1>
-          <p>AI-made audio walking tours, created just for you.</p>
+          {/* Logo centered */}
+          <div className="flex justify-center mb-4">
+            <img 
+              src={logo} 
+              alt="Hear & There" 
+              className="h-[72px] w-auto"
+            />
+          </div>
+          <p className="text-lg font-bold text-slate-900">AI-made audio walking tours, created just for you.</p>
         </header>
         {/* STEP 1: Input Form - Hidden when tours are shown */}
         {!showTourSuggestions && (
