@@ -1079,11 +1079,10 @@ function App() {
           <h1 className="text-xs font-semibold text-slate-900 mb-2">Discover what's around you</h1>
           <p>AI-made audio walking tours, created just for you.</p>
         </header>
-        {/* STEP 1: Input Form */}
-        <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
-         
-
-          <form onSubmit={handleSubmit} className="space-y-6">
+        {/* STEP 1: Input Form - Hidden when tours are shown */}
+        {!showTourSuggestions && (
+          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
+            <form onSubmit={handleSubmit} className="space-y-6">
               <section>
                 <h2 className="text-sm font-semibold text-slate-800 mb-3">Start from here</h2>
 
@@ -1254,6 +1253,7 @@ function App() {
               </div>
             </form>
           </div>
+        )}
 
         {/* STEP 2: Tour Suggestions (with lazy loading) */}
         {showTourSuggestions && !selectedTour && (
