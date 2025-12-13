@@ -174,7 +174,9 @@ export function createGenerateCandidateToursNode({
 
       return {
         messages: [...messages, msg],
-        candidateTours: allTours
+        finalTours: validatedTours,
+        rawTours,
+        validatedTours
       };
     } catch (err) {
       console.error('[generateCandidateTours] Failed to generate candidate tours:', err);
