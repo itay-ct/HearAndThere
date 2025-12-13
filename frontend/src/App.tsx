@@ -4,7 +4,7 @@ import { TourSuggestions } from './components/TourSuggestions'
 import logo from './assets/logo.svg'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
-  ? 'https://hear-and-there-production.up.railway.app'
+  ? 'https://api.hearnthere.com:8080'
   : 'http://localhost:4000';
 
 const ENGLISH_VOICE = import.meta.env.VITE_ENGLISH_VOICE || 'en-GB-Wavenet-B';

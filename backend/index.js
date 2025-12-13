@@ -49,9 +49,7 @@ async function start() {
       'http://localhost:5173', // Vite default port
       'http://localhost:4173', // Vite preview port
       'http://localhost:5174', // Another common Vite port
-      'https://hear-and-there.vercel.app',  // Old URL
-      'https://www.hearnthere.com',  
-      'https://hearnthere.com' 
+      'https://www.hearnthere.com',  // New frontend domain
     ],
     credentials: true
   }));
