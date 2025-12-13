@@ -1,0 +1,30 @@
+{
+  "name": "Hear & There",
+  "short_name": "Hear & There",
+  "description": "AI-made audio walking tours, created just for you.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fefaf6",
+  "theme_color": "#fefaf6",
+  "icons": [
+    {
+      "src": "/icon-pin-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-pin-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-pin.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

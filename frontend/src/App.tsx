@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LocateFixed, MapPinned, MapPinOff, Minus, Plus } from 'lucide-react'
 import { TourSuggestions } from './components/TourSuggestions'
+import logo from './assets/logo.svg'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://hear-and-there-production.up.railway.app'
@@ -1064,11 +1065,19 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
+    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10 relative">
+      {/* Logo in top left corner */}
+      <div className="absolute top-4 left-4 z-10">
+        <img 
+          src={logo} 
+          alt="Hear & There" 
+          className="h-12 w-auto"
+        />
+      </div>
       <div className="w-full max-w-2xl space-y-6">
          <header className="mb-8 text-center">
-          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Hear &amp; There</h1>
-          <p>Generate your own personalized audio-guided walking tour</p>
+          <h1 className="text-xs font-semibold text-slate-900 mb-2">Discover what's around you</h1>
+          <p>AI-made audio walking tours, created just for you.</p>
         </header>
         {/* STEP 1: Input Form */}
         <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -1076,7 +1085,7 @@ function App() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
               <section>
-                <h2 className="text-sm font-semibold text-slate-800 mb-3">Your location</h2>
+                <h2 className="text-sm font-semibold text-slate-800 mb-3">Start from here</h2>
 
                 {!showLocationInputs ? (
                   <button
@@ -1115,7 +1124,7 @@ function App() {
                     ) : (
                       <>
                         <LocateFixed className="w-5 h-5" />
-                        <span className="text-sm font-medium">Detect my location</span>
+                        <span className="text-sm font-medium">Use my location</span>
                       </>
                     )}
                   </button>
@@ -1174,7 +1183,7 @@ function App() {
               <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {/* Tour Duration */}
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-3">Tour duration</h2>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-3">How much time do you have?</h2>
                   <div className="inline-flex items-center rounded-xl border border-slate-200 overflow-hidden">
                     {/* Decrease button */}
                     <button
@@ -1221,13 +1230,13 @@ function App() {
 
               <section>
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">Customization</h2>
-                  <p className="text-xs text-slate-500">Optional</p>
+                  <h2 className="text-sm font-semibold text-slate-800">Anything you're in the mood for?</h2>
+                  <p className="text-xs text-slate-500">(optional)</p>
                 </div>
                 <textarea
                   value={customization}
                   onChange={(e) => setCustomization(e.target.value)}
-                  placeholder="E.g., 'Focus on street art and modern culture' or 'Include kid-friendly stops'"
+                  placeholder="E.g., 'Make it a circular route', 'Focus on street art', 'Show me hidden gems', 'Add food stops'"
                   rows={3}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
                 />
@@ -1240,7 +1249,7 @@ function App() {
                   disabled={!canSubmit || status === 'saving'}
                   className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {status === 'saving' ? 'Generating tours…' : 'Propose Tours'}
+                  {status === 'saving' ? 'Generating tours…' : 'Create My Tours'}
                 </button>
               </div>
             </form>
@@ -1300,6 +1309,13 @@ function App() {
               <h2 className="text-2xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h2>
               <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
             </header>
+
+            {/* Legal disclaimer */}
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-xs text-amber-800 text-center">
+                Routes are AI-generated. Always stay aware of your surroundings and use your own judgment.
+              </p>
+            </div>
 
             {mapError ? (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">

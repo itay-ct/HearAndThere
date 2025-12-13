@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <!-- ICON - enlarged and centered for better visibility in browser tab -->
+  <g transform="translate(0, 0)">
+    <!-- Location pin - scaled up by ~1.5x -->
+    <path
+      d="M128 0
+         C75 0 32 43 32 96
+         C32 156 88 224 120 256
+         C124 262 132 262 136 256
+         C168 224 224 156 224 96
+         C224 43 181 0 128 0Z"
+      fill="#1AB6B4"
+      transform="translate(0, 8)"
+    />
+
+    <!-- Inner circle -->
+    <circle cx="128" cy="104" r="56" fill="#FFFFFF"/>
+
+    <!-- Audio bars - scaled up -->
+    <g fill="#000000" transform="translate(128,104)">
+      <rect x="-38" y="-18" width="10" height="36" rx="5"/>
+      <rect x="-20" y="-28" width="10" height="56" rx="5"/>
+      <rect x="-2"  y="-36" width="12" height="72" rx="6"/>
+      <rect x="16"  y="-28" width="10" height="56" rx="5"/>
+      <rect x="34"  y="-18" width="10" height="36" rx="5"/>
+    </g>
+  </g>
+</svg>
