@@ -41,74 +41,8 @@ async function getGeminiModel() {
   return geminiModelPromise;
 }
 
-// Define JSON schema for tour generation structured output (non-streaming)
+// Define unified JSON schema for tour generation (top-level array for both streaming and non-streaming)
 const tourGenerationSchema = {
-  type: "object",
-  properties: {
-    tours: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-            description: "Unique identifier for the tour"
-          },
-          title: {
-            type: "string",
-            description: "Tour title"
-          },
-          abstract: {
-            type: "string",
-            description: "Brief description of the tour"
-          },
-          theme: {
-            type: "string",
-            description: "Tour theme (e.g., History, Food & Culture, Hidden Gems)"
-          },
-          estimatedTotalMinutes: {
-            type: "number",
-            description: "Total estimated duration in minutes including walking and dwell time"
-          },
-          stops: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: {
-                  type: "string",
-                  description: "Name of the stop/POI"
-                },
-                latitude: {
-                  type: "number",
-                  description: "Latitude coordinate"
-                },
-                longitude: {
-                  type: "number",
-                  description: "Longitude coordinate"
-                },
-                dwellMinutes: {
-                  type: "number",
-                  description: "Time to spend at this stop in minutes"
-                },
-                walkMinutesFromPrevious: {
-                  type: "number",
-                  description: "Walking time from previous stop in minutes (0 for first stop)"
-                }
-              },
-              required: ["name", "latitude", "longitude", "dwellMinutes", "walkMinutesFromPrevious"]
-            }
-          }
-        },
-        required: ["id", "title", "abstract", "theme", "estimatedTotalMinutes", "stops"]
-      }
-    }
-  },
-  required: ["tours"]
-};
-
-// Define JSON schema for streaming tour generation (top-level array)
-const tourGenerationStreamingSchema = {
   type: "array",
   items: {
     type: "object",
@@ -280,67 +214,7 @@ async function* extractToursFromStream(textStream) {
   debugLog(`Streaming complete. Total tours emitted: ${toursEmitted}`);
 }
 
-/**
- * Generate heuristic tours from POIs (fallback when LLM is unavailable)
- */
-export function heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois }) {
-  if (!pois || pois.length === 0) {
-    const baseTitle = city || 'Your Area';
-    return [
-      {
-        id: 'tour_1',
-        title: `Stroll Around ${baseTitle}`,
-        abstract: 'A relaxed loop around your starting point with a few nearby highlights.',
-        theme: 'General Highlights',
-        estimatedTotalMinutes: durationMinutes,
-        stops: [
-          {
-            name: 'Start Point',
-            latitude,
-            longitude,
-            dwellMinutes: 10,
-            walkMinutesFromPrevious: 0,
-          },
-        ],
-      },
-    ];
-  }
-
-  const chunkSize = Math.max(2, Math.min(5, Math.ceil(pois.length / 3)));
-  const chunks = [];
-  for (let i = 0; i < 3; i++) {
-    const slice = pois.slice(i * chunkSize, (i + 1) * chunkSize);
-    if (slice.length === 0) break;
-    chunks.push(slice);
-  }
-
-  const themes = ['History', 'Hidden Gems', 'Food & Culture'];
-
-  return chunks.map((chunk, index) => {
-    const theme = themes[index] || 'Local Highlights';
-    const title = `${theme} Walk in ${city || 'Your Area'}`;
-    const perStopDwell = 15;
-    const walkBetween = 8;
-    const stops = chunk.map((poi, idx) => ({
-      name: poi.name,
-      latitude: poi.latitude,
-      longitude: poi.longitude,
-      dwellMinutes: perStopDwell,
-      walkMinutesFromPrevious: idx === 0 ? 0 : walkBetween,
-    }));
-    const estimatedTotalMinutes =
-      stops.reduce((sum, s) => sum + s.dwellMinutes + s.walkMinutesFromPrevious, 0);
-
-    return {
-      id: `tour_${index + 1}`,
-      title,
-      abstract: `A ${theme.toLowerCase()}-flavored route visiting ${stops.length} nearby spots.`,
-      theme,
-      estimatedTotalMinutes,
-      stops,
-    };
-  });
-}
+// Remove the entire heuristic function - no longer needed
 
 /**
  * Generate tours using Gemini LLM with streaming support
@@ -365,20 +239,15 @@ export async function generateToursWithGemini({
   redisClient = null,
   streaming = false
 }) {
-  const fallback = () =>
-    heuristicToursFromPois({ latitude, longitude, durationMinutes, city, pois });
-
   if (!GEMINI_API_KEY) {
-    console.warn('[tourHelpers] GEMINI_API_KEY is not set; using heuristic tours instead.');
-    debugLog('generateToursWithGemini: missing GEMINI_API_KEY, using fallback');
-    return fallback();
+    console.error('[tourHelpers] GEMINI_API_KEY is not set');
+    throw new Error('Tour generation service is unavailable. Please try again later.');
   }
 
   const model = await getGeminiModel();
   if (!model) {
-    console.warn('[tourHelpers] Gemini model not initialized; using heuristic tours instead.');
-    debugLog('generateToursWithGemini: model not initialized, using fallback');
-    return fallback();
+    console.error('[tourHelpers] Gemini model not initialized');
+    throw new Error('Tour generation service is unavailable. Please try again later.');
   }
 
   const languageInstruction = language === 'hebrew'
@@ -523,7 +392,7 @@ export async function generateToursWithGemini({
           contents: [{ role: 'user', parts: [{ text: promptText }] }],
           generationConfig: {
             responseMimeType: 'application/json',
-            responseSchema: tourGenerationStreamingSchema,
+            responseSchema: tourGenerationSchema, // Now uses the same unified schema
           },
         });
 
@@ -586,7 +455,7 @@ export async function generateToursWithGemini({
         contents: [{ role: 'user', parts: [{ text: promptText }] }],
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: tourGenerationSchema,
+          responseSchema: tourGenerationSchema, // Now uses the unified schema
         },
       });
 
@@ -646,8 +515,8 @@ export async function generateToursWithGemini({
       return fallback();
     }
 
-    console.log('[tourHelpers] generateToursWithGemini: parsed object keys:', Object.keys(parsed));
-    const tours = Array.isArray(parsed.tours) ? parsed.tours : [];
+    console.log('[tourHelpers] generateToursWithGemini: parsed array length:', parsed.length);
+    const tours = Array.isArray(parsed) ? parsed : [];
     console.log('[tourHelpers] generateToursWithGemini: tours array length:', tours.length);
     debugLog('generateToursWithGemini: parsed tours count', tours.length);
 

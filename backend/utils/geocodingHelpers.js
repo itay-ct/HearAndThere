@@ -113,7 +113,7 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
   if (!GOOGLE_MAPS_API_KEY) {
     console.warn('[geocodingHelpers] GOOGLE_MAPS_API_KEY is not set; skipping Google Maps reverse-geocoding.');
     debugLog('reverseGeocodeWithGoogleMaps: missing GOOGLE_MAPS_API_KEY');
-    return { countryCode: null, countryName: null, city: null, neighborhood: null };
+    return { countryName: null, city: null, neighborhood: null };
   }
 
   const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&location_type=RANGE_INTERPOLATED&key=${GOOGLE_MAPS_API_KEY}`;
@@ -137,17 +137,14 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
         debugLog('reverseGeocodeWithGoogleMaps: got response result count', Array.isArray(data.results) ? data.results.length : 0);
         const first = data.results && data.results[0];
         if (!first || !first.address_components) {
-          return { countryCode: null, countryName: null, city: null, neighborhood: null };
+          return { countryName: null, city: null, neighborhood: null };
         }
 
-        let countryCode = null;
         let countryName = null;
         let city = null;
         let neighborhood = null;
         for (const comp of first.address_components) {
           if (comp.types.includes('country')) {
-            // Use short_name for country code (e.g., "US") and lowercase it
-            countryCode = comp.short_name ? comp.short_name.toLowerCase() : null;
             // Use long_name for full country name (e.g., "United States")
             countryName = comp.long_name || null;
           }
@@ -163,7 +160,7 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
           }
         }
 
-        return { countryCode, countryName, city, neighborhood };
+        return { countryName, city, neighborhood };
       },
       4, // maxRetries
       1000 // 1 second delay
@@ -171,7 +168,7 @@ async function reverseGeocodeWithGoogleMaps(latitude, longitude) {
   } catch (err) {
     console.error('[geocodingHelpers] Google Maps reverse geocoding failed after 4 retries:', err.message);
     debugLog('reverseGeocodeWithGoogleMaps: error', err.message);
-    return { countryCode, countryName: null, city: null, neighborhood: null };
+    return { countryName: null, city: null, neighborhood: null };
   }
 }
 
@@ -214,8 +211,6 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
 
         const address = data.address || {};
 
-        // Extract country_code (e.g., "us") - lowercase for consistency
-        const countryCode = address.country_code ? address.country_code.toLowerCase() : null;
         // Extract full country name (e.g., "United States")
         const countryName = address.country || null;
 
@@ -253,8 +248,8 @@ async function reverseGeocodeWithLocationIQ(latitude, longitude) {
           city = neighborhoodValue;
         }
 
-        debugLog('reverseGeocodeWithLocationIQ: extracted', { countryCode, countryName, city, neighborhood });
-        return { countryCode, countryName, city, neighborhood };
+        debugLog('reverseGeocodeWithLocationIQ: extracted', { countryName, city, neighborhood });
+        return { countryName, city, neighborhood };
       },
       4, // maxRetries
       1000, // 1 second delay

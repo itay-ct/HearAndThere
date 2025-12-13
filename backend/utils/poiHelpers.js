@@ -82,16 +82,6 @@ export async function cachePlaceInRedis(redisClient, place) {
   const placeKey = `poi_cache:${place.id}`;
 
   try {
-    // Check if place already exists
-    let existingPlace = null;
-    try {
-      const existing = await redisClient.json.get(placeKey, { path: '$' });
-      existingPlace = existing && existing[0];
-    } catch (jsonErr) {
-      // Key doesn't exist or not JSON, that's fine
-      debugLog('No existing place found for', place.id);
-    }
-
     // Prepare place document
     // Note: RediSearch GEO type requires "longitude,latitude" format as a string
     const placeDoc = {
@@ -103,13 +93,13 @@ export async function cachePlaceInRedis(redisClient, place) {
       primary: place.primary !== undefined ? place.primary : true,
       source: 'google_places_api',
       fetched_at: new Date().toISOString(),
-      notes: existingPlace?.notes || null,
-      tags: existingPlace?.tags || [],
-      images: existingPlace?.images || [],
+      notes: null,
+      tags: [],
+      images: [],
       // Location context fields (populated on-demand during audioguide generation)
-      country: place.country || existingPlace?.country || null,
-      city: place.city || existingPlace?.city || null,
-      neighborhood: place.neighborhood || existingPlace?.neighborhood || null
+      country: place.country || null,
+      city: place.city || null,
+      neighborhood: place.neighborhood || null
     };
 
     debugLog('Caching place:', {
@@ -174,14 +164,8 @@ export const searchPlacesNearby = traceable(async (latitude, longitude, radiusMe
   return places.map((place, index) => {
     const originalTypes = place.types || [];
 
-    // Filter out generic types that don't add value, but only if there are other types
+    // Filter out generic types that don't add value
     let types = originalTypes.filter(t => t !== 'point_of_interest' && t !== 'establishment');
-
-    // If filtering removed all types, keep the original types (better than nothing)
-    if (originalTypes.length > 0 && types.length === 0) {
-      debugLog(`[searchPlacesNearby] Only generic types for "${place.displayName?.text}":`, originalTypes);
-      types = originalTypes; // Keep original types rather than having empty array
-    }
 
     return {
       id: place.id || `poi_${index + 1}`,
@@ -362,12 +346,6 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
 
                 // Filter out generic types that don't add value, but only if there are other types
                 types = types.filter(t => t !== 'point_of_interest' && t !== 'establishment');
-
-                // If filtering removed all types, keep the original types (better than nothing)
-                if (originalTypes.length > 0 && types.length === 0) {
-                  debugLog(`[Redis] Only generic types for "${name}":`, originalTypes);
-                  types = originalTypes; // Keep original types rather than having empty array
-                }
 
                 pois.push({
                   id: placeId,
