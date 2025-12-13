@@ -49,7 +49,8 @@ async function start() {
       'http://localhost:5173', // Vite default port
       'http://localhost:4173', // Vite preview port
       'http://localhost:5174', // Another common Vite port
-      'https://www.hearnthere.com',  // New frontend domain
+      'https://www.hearnthere.com',  // Production frontend domain
+      'https://hearnthere.com',      // Production frontend domain (without www)
     ],
     credentials: true
   }));
