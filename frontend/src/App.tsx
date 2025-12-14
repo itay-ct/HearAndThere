@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LocateFixed, MapPinned, MapPinOff, Minus, Plus } from 'lucide-react'
 import { TourSuggestions } from './components/TourSuggestions'
-import logo from './assets/logo.svg'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://api.hearnthere.com'
@@ -583,8 +582,8 @@ function App() {
     // LangGraph pipeline is running on the backend.
     const clientSessionId =
       typeof window !== 'undefined' &&
-      'crypto' in window &&
-      typeof window.crypto.randomUUID === 'function'
+        'crypto' in window &&
+        typeof window.crypto.randomUUID === 'function'
         ? window.crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -1065,384 +1064,391 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#fefaf6] text-slate-900 flex flex-col items-center px-4 py-10">
-      {/* Logo centered - full width container for proper centering on mobile */}
-      <div className="w-full flex justify-center mb-4">
-        <img 
-          src={logo} 
-          alt="Hear & There" 
-          className="h-[72px] w-auto"
-        />
-      </div>
-      <div className="w-full max-w-2xl space-y-6">
-         <header className="mb-8 text-center px-6 sm:px-0">
-          <p className="text-lg font-bold text-slate-900 px-2 sm:px-0">AI-made audio walking tours, created just for you.</p>
-        </header>
-        {/* STEP 1: Input Form - Hidden when tours are shown */}
-        {!showTourSuggestions && (
-          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <section>
-                <h2 className="text-sm font-semibold text-slate-800 mb-3">Start from here</h2>
+    <div className="min-h-screen bg-gradient-to-br from-cyan-50/30 via-white to-teal-50/20 relative overflow-hidden text-slate-900 flex flex-col items-center px-4 py-10">
+      {/* Decorative blur circles */}
+      <div className="absolute top-0 right-0 w-96 h-96 bg-cyan-200/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+      <div className="absolute bottom-0 left-0 w-96 h-96 bg-teal-200/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2" />
 
-                {!showLocationInputs ? (
-                  <button
-                    type="button"
-                    onClick={handleLocationButtonClick}
-                    onMouseDown={handleLocationButtonPress}
-                    onMouseUp={handleLocationButtonRelease}
-                    onMouseLeave={handleLocationButtonRelease}
-                    onTouchStart={handleLocationButtonPress}
-                    onTouchEnd={handleLocationButtonRelease}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                      locationStatus === 'detected'
+      {/* Content wrapper */}
+      <div className="relative z-10 w-full flex flex-col items-center">
+        {/* Logo with pin icon and text - centered */}
+        <div className="w-full flex justify-center mb-4">
+          <div className="flex items-center gap-3">
+            <img
+              src="/icon-pin.svg"
+              alt="Pin icon"
+              className="h-[34px] w-auto"
+            />
+            <span className="text-2xl text-slate-900">Hear & There</span>
+          </div>
+        </div>
+        <div className="w-full max-w-2xl space-y-6">
+          <header className="mb-8 text-center px-6 sm:px-0">
+            <p className="text-lg font-light text-slate-900 px-2 sm:px-0">AI-made audio walking tours, created just for you.</p>
+          </header>
+          {/* STEP 1: Input Form - Hidden when tours are shown */}
+          {!showTourSuggestions && (
+            <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${toursGenerated ? 'opacity-50 pointer-events-none' : ''}`}>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <section>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-3">Start from here</h2>
+
+                  {!showLocationInputs ? (
+                    <button
+                      type="button"
+                      onClick={handleLocationButtonClick}
+                      onMouseDown={handleLocationButtonPress}
+                      onMouseUp={handleLocationButtonRelease}
+                      onMouseLeave={handleLocationButtonRelease}
+                      onTouchStart={handleLocationButtonPress}
+                      onTouchEnd={handleLocationButtonRelease}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${locationStatus === 'detected'
                         ? 'border-green-200 bg-green-50 text-green-700'
                         : locationStatus === 'error'
-                        ? 'border-red-200 bg-red-50 text-red-700'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50'
-                    }`}
-                  >
-                    {locationStatus === 'detecting' ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-sm font-medium">Detecting location...</span>
-                      </>
-                    ) : locationStatus === 'detected' ? (
-                      <>
-                        <MapPinned className="w-5 h-5" />
-                        <span className="text-sm font-medium">
-                          {locationDisplayText || 'Location Detected'}
-                        </span>
-                      </>
-                    ) : locationStatus === 'error' ? (
-                      <>
-                        <MapPinOff className="w-5 h-5" />
-                        <span className="text-sm font-medium">Location cannot be detected - Try Again</span>
-                      </>
-                    ) : (
-                      <>
-                        <LocateFixed className="w-5 h-5" />
-                        <span className="text-sm font-medium">Use my location</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <label className="flex flex-col text-xs font-medium text-slate-700">
-                        Latitude
-                        <input
-                          type="number"
-                          step="0.000001"
-                          value={latitude}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setLatitude(value === '' ? '' : Number(value))
-                          }}
-                          placeholder="32.0809"
-                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                          required
-                        />
-                      </label>
-
-                      <label className="flex flex-col text-xs font-medium text-slate-700">
-                        Longitude
-                        <input
-                          type="number"
-                          step="0.000001"
-                          value={longitude}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setLongitude(value === '' ? '' : Number(value))
-                          }}
-                          placeholder="34.7806"
-                          className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                          required
-                        />
-                      </label>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowLocationInputs(false)
-                        // Restore saved city/neighborhood/country when going back to auto-detect
-                        setCity(savedCityRef.current)
-                        setNeighborhood(savedNeighborhoodRef.current)
-                        setCountry(savedCountryRef.current)
-                      }}
-                      className="text-xs text-slate-600 hover:text-slate-900 underline"
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50'
+                        }`}
                     >
-                      Hide manual input
-                    </button>
-                  </div>
-                )}
-              </section>
-
-              <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {/* Tour Duration */}
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-3">How much time do you have?</h2>
-                  <div className="inline-flex items-center rounded-xl border border-slate-200 overflow-hidden">
-                    {/* Decrease button */}
-                    <button
-                      type="button"
-                      onClick={handleDecreaseDuration}
-                      disabled={DURATION_OPTIONS.indexOf(durationMinutes) === 0}
-                      className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-
-                    {/* Fixed width label */}
-                    <div className="w-24 text-center select-none">
-                      <p className="text-sm font-semibold text-slate-900">
-                        {getDurationLabel(durationMinutes)}
-                      </p>
-                    </div>
-
-                    {/* Increase button */}
-                    <button
-                      type="button"
-                      onClick={handleIncreaseDuration}
-                      disabled={DURATION_OPTIONS.indexOf(durationMinutes) === DURATION_OPTIONS.length - 1}
-                      className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Language - Hidden for now, keeping English as default */}
-                <div style={{ display: 'none' }}>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-3">Language</h2>
-                  <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
-                  >
-                    <option value="english">English</option>
-                    <option value="hebrew">עברית (Hebrew)</option>
-                  </select>
-                </div>
-              </section>
-
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">Anything you're in the mood for?</h2>
-                  <p className="text-xs text-slate-500">(optional)</p>
-                </div>
-                <textarea
-                  value={customization}
-                  onChange={(e) => setCustomization(e.target.value)}
-                  placeholder="E.g., 'Make it a circular route', 'Focus on street art', 'Show me hidden gems', 'Add food stops'"
-                  rows={3}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
-                />
-              </section>
-
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={!canSubmit || status === 'saving'}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {status === 'saving' ? 'Generating tours…' : 'Create My Tours'}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* STEP 2: Tour Suggestions (with lazy loading) */}
-        {showTourSuggestions && !selectedTour && (
-          <div className={`transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
-            <TourSuggestions
-              tours={tours}
-              selectedTourId={selectedTourId}
-              onSelectTour={handleSelectTour}
-              onGoBack={async () => {
-                // If still loading, cancel the request
-                if (status === 'saving' && tours.length === 0) {
-                  await handleCancelTourGeneration()
-                } else {
-                  // Otherwise just go back
-                  setShowTourSuggestions(false)
-                  setToursGenerated(false)
-                  setTours([])
-                  setSelectedTour(null)
-                  setSelectedTourId(null)
-                  setMessage('')
-                  setLoadingStatus('')
-                }
-              }}
-              neighborhood={neighborhood}
-              city={city}
-              isLoading={status === 'saving'}
-              loadingStatus={loadingStatus}
-              loadingIcon={loadingIcon}
-              expectedTourCount={4}
-              interestingMessages={interestingMessages}
-              currentMessageIndex={currentMessageIndex}
-            />
-          </div>
-        )}
-
-        {/* STEP 3: Map View */}
-        {selectedTour && (
-          <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${audioguideData || audioguideGenerating || audioguideError ? 'opacity-50 pointer-events-none' : ''}`}>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedTour(null);
-                setSelectedTourId(null);
-                setMessage(''); // Clear message when going back
-              }}
-              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
-            >
-              <span>←</span>
-              <span>Go Back</span>
-            </button>
-
-            <header className="mb-6 text-center">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h2>
-              <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
-            </header>
-
-            {/* Legal disclaimer */}
-            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-xs text-amber-800 text-center">
-                Routes are AI-generated. Always stay aware of your surroundings and use your own judgment.
-              </p>
-            </div>
-
-            {mapError ? (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-                {mapError}
-              </div>
-            ) : (
-              <div
-                id="tour-map"
-                className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100 mb-6"
-                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
-              />
-            )}
-
-            <div className="bg-slate-50 rounded-xl p-4 mb-6">
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
-              <p className="text-xs text-slate-600 mb-3">
-                ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
-              </p>
-
-              <ol className="space-y-2 text-xs text-slate-600">
-                {selectedTour.stops.map((stop, idx) => {
-                  const walkText = stop.walkMinutesFromPrevious > 0 ? `walk ${stop.walkMinutesFromPrevious} min` : null
-                  const dwellText = stop.dwellMinutes > 0 ? `dwell ${stop.dwellMinutes} min` : null
-                  const details = [walkText, dwellText].filter(Boolean).join(' · ')
-
-                  return (
-                    <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
-                      <span className="font-semibold text-slate-500">{idx + 1}.</span>
-                      <span className="flex-1">
-                        {stop.name}{' '}
-                        {details && (
-                          <span className="text-slate-400">
-                            · {details}
+                      {locationStatus === 'detecting' ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                          <span className="text-sm font-medium">Detecting location...</span>
+                        </>
+                      ) : locationStatus === 'detected' ? (
+                        <>
+                          <MapPinned className="w-5 h-5" />
+                          <span className="text-sm font-medium">
+                            {locationDisplayText || 'Location Detected'}
                           </span>
-                        )}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ol>
-            </div>
+                        </>
+                      ) : locationStatus === 'error' ? (
+                        <>
+                          <MapPinOff className="w-5 h-5" />
+                          <span className="text-sm font-medium">Location cannot be detected - Try Again</span>
+                        </>
+                      ) : (
+                        <>
+                          <LocateFixed className="w-5 h-5" />
+                          <span className="text-sm font-medium">Use my location</span>
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <label className="flex flex-col text-xs font-medium text-slate-700">
+                          Latitude
+                          <input
+                            type="number"
+                            step="0.000001"
+                            value={latitude}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setLatitude(value === '' ? '' : Number(value))
+                            }}
+                            placeholder="32.0809"
+                            className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                            required
+                          />
+                        </label>
 
-            {/* STEP 4: Voice Selection & Generate Audioguide Button */}
-            {!audioguideData && !audioguideGenerating && !audioguideError && (
-              <div className="space-y-4">
-                {/* Voice Selection - Hidden for now, keeping default voice */}
-                <div style={{ display: 'none' }}>
-                  <label htmlFor="voice-select" className="block text-xs font-medium text-slate-700 mb-2">
-                    🎙️ Select Voice
-                  </label>
-                  <select
-                    id="voice-select"
-                    value={selectedVoice}
-                    onChange={(e) => setSelectedVoice(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+                        <label className="flex flex-col text-xs font-medium text-slate-700">
+                          Longitude
+                          <input
+                            type="number"
+                            step="0.000001"
+                            value={longitude}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setLongitude(value === '' ? '' : Number(value))
+                            }}
+                            placeholder="34.7806"
+                            className="mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                            required
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLocationInputs(false)
+                          // Restore saved city/neighborhood/country when going back to auto-detect
+                          setCity(savedCityRef.current)
+                          setNeighborhood(savedNeighborhoodRef.current)
+                          setCountry(savedCountryRef.current)
+                        }}
+                        className="text-xs text-slate-600 hover:text-slate-900 underline"
+                      >
+                        Hide manual input
+                      </button>
+                    </div>
+                  )}
+                </section>
+
+                <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* Tour Duration */}
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800 mb-3">How much time do you have?</h2>
+                    <div className="inline-flex items-center rounded-xl border border-slate-200 overflow-hidden">
+                      {/* Decrease button */}
+                      <button
+                        type="button"
+                        onClick={handleDecreaseDuration}
+                        disabled={DURATION_OPTIONS.indexOf(durationMinutes) === 0}
+                        className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
+
+                      {/* Fixed width label */}
+                      <div className="w-24 text-center select-none">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {getDurationLabel(durationMinutes)}
+                        </p>
+                      </div>
+
+                      {/* Increase button */}
+                      <button
+                        type="button"
+                        onClick={handleIncreaseDuration}
+                        disabled={DURATION_OPTIONS.indexOf(durationMinutes) === DURATION_OPTIONS.length - 1}
+                        className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Language - Hidden for now, keeping English as default */}
+                  <div style={{ display: 'none' }}>
+                    <h2 className="text-sm font-semibold text-slate-800 mb-3">Language</h2>
+                    <select
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70"
+                    >
+                      <option value="english">English</option>
+                      <option value="hebrew">עברית (Hebrew)</option>
+                    </select>
+                  </div>
+                </section>
+
+                <section>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-sm font-semibold text-slate-800">Anything you're in the mood for?</h2>
+                    <p className="text-xs text-slate-500">(optional)</p>
+                  </div>
+                  <textarea
+                    value={customization}
+                    onChange={(e) => setCustomization(e.target.value)}
+                    placeholder="E.g., 'Make it a circular route', 'Focus on street art', 'Show me hidden gems', 'Add food stops'"
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
+                  />
+                </section>
+
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={!canSubmit || status === 'saving'}
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {language === 'hebrew' ? (
-                      <>
-                        <option value="he-IL-Standard-D">Hebrew - Standard (Default)</option>
-                        <option value="he-IL-Chirp3-HD-Alnilam">Hebrew - Chirp3 HD</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value={ENGLISH_VOICE}>English (UK) - Wavenet (Default)</option>
-                        <option value="en-US-Chirp3-HD-Algenib">English (US) - Chirp3 HD</option>
-                      </>
-                    )}
-                  </select>
+                    {status === 'saving' ? 'Generating tours…' : 'Create My Tours'}
+                  </button>
                 </div>
-
-                {/* Generate Button */}
-                <button
-                  type="button"
-                  onClick={handleGenerateAudioguide}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-                >
-                  🎧 Generate Audioguide
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-
-        {selectedTour && shareableTourId && (
-          <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
-              <h3 className="text-sm font-semibold text-emerald-900 mb-4">
-                🎧 Your Audioguide is Being Created!
-              </h3>
-              <p className="text-xs text-emerald-700 mb-6">
-                Your personalized audioguide is being generated. Click the button below to view your tour page.
-              </p>
-              <button
-                onClick={() => window.location.href = `/tour/${shareableTourId}`}
-                className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-              >
-                🎧 Take me to my audiotour
-              </button>
-              <p className="text-xs text-slate-500 mt-4">
-                You can share this link with others!
-              </p>
+              </form>
             </div>
-          </div>
-        )}
-        
+          )}
 
-        {/* Status Message */}
-        {(status !== 'idle' || message) && (
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-700">
-            {message && <p className="mb-1">{message}</p>}
-          </div>
-        )}
+          {/* STEP 2: Tour Suggestions (with lazy loading) */}
+          {showTourSuggestions && !selectedTour && (
+            <div className={`transition-opacity ${selectedTour ? 'opacity-50 pointer-events-none' : ''}`}>
+              <TourSuggestions
+                tours={tours}
+                selectedTourId={selectedTourId}
+                onSelectTour={handleSelectTour}
+                onGoBack={async () => {
+                  // If still loading, cancel the request
+                  if (status === 'saving' && tours.length === 0) {
+                    await handleCancelTourGeneration()
+                  } else {
+                    // Otherwise just go back
+                    setShowTourSuggestions(false)
+                    setToursGenerated(false)
+                    setTours([])
+                    setSelectedTour(null)
+                    setSelectedTourId(null)
+                    setMessage('')
+                    setLoadingStatus('')
+                  }
+                }}
+                neighborhood={neighborhood}
+                city={city}
+                isLoading={status === 'saving'}
+                loadingStatus={loadingStatus}
+                loadingIcon={loadingIcon}
+                expectedTourCount={4}
+                interestingMessages={interestingMessages}
+                currentMessageIndex={currentMessageIndex}
+              />
+            </div>
+          )}
+
+          {/* STEP 3: Map View */}
+          {selectedTour && (
+            <div className={`rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8 transition-opacity ${audioguideData || audioguideGenerating || audioguideError ? 'opacity-50 pointer-events-none' : ''}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTour(null);
+                  setSelectedTourId(null);
+                  setMessage(''); // Clear message when going back
+                }}
+                className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+              >
+                <span>←</span>
+                <span>Go Back</span>
+              </button>
+
+              <header className="mb-6 text-center">
+                <h2 className="text-2xl font-semibold text-slate-900 mb-2">{selectedTour.title}</h2>
+                <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
+              </header>
+
+              {/* Legal disclaimer */}
+              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <p className="text-xs text-amber-800 text-center">
+                  Routes are AI-generated. Always stay aware of your surroundings and use your own judgment.
+                </p>
+              </div>
+
+              {mapError ? (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                  {mapError}
+                </div>
+              ) : (
+                <div
+                  id="tour-map"
+                  className="w-full h-96 rounded-xl border border-slate-200 bg-slate-100 mb-6"
+                  style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+                />
+              )}
+
+              <div className="bg-slate-50 rounded-xl p-4 mb-6">
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
+                <p className="text-xs text-slate-600 mb-3">
+                  ⏱️ ~{selectedTour.estimatedTotalMinutes} min · {selectedTour.stops.length} stops
+                </p>
+
+                <ol className="space-y-2 text-xs text-slate-600">
+                  {selectedTour.stops.map((stop, idx) => {
+                    const walkText = stop.walkMinutesFromPrevious > 0 ? `walk ${stop.walkMinutesFromPrevious} min` : null
+                    const dwellText = stop.dwellMinutes > 0 ? `dwell ${stop.dwellMinutes} min` : null
+                    const details = [walkText, dwellText].filter(Boolean).join(' · ')
+
+                    return (
+                      <li key={`${selectedTour.id}-stop-${idx}`} className="flex gap-2">
+                        <span className="font-semibold text-slate-500">{idx + 1}.</span>
+                        <span className="flex-1">
+                          {stop.name}{' '}
+                          {details && (
+                            <span className="text-slate-400">
+                              · {details}
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </div>
+
+              {/* STEP 4: Voice Selection & Generate Audioguide Button */}
+              {!audioguideData && !audioguideGenerating && !audioguideError && (
+                <div className="space-y-4">
+                  {/* Voice Selection - Hidden for now, keeping default voice */}
+                  <div style={{ display: 'none' }}>
+                    <label htmlFor="voice-select" className="block text-xs font-medium text-slate-700 mb-2">
+                      🎙️ Select Voice
+                    </label>
+                    <select
+                      id="voice-select"
+                      value={selectedVoice}
+                      onChange={(e) => setSelectedVoice(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+                    >
+                      {language === 'hebrew' ? (
+                        <>
+                          <option value="he-IL-Standard-D">Hebrew - Standard (Default)</option>
+                          <option value="he-IL-Chirp3-HD-Alnilam">Hebrew - Chirp3 HD</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value={ENGLISH_VOICE}>English (UK) - Wavenet (Default)</option>
+                          <option value="en-US-Chirp3-HD-Algenib">English (US) - Chirp3 HD</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Generate Button */}
+                  <button
+                    type="button"
+                    onClick={handleGenerateAudioguide}
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                  >
+                    🎧 Generate Audioguide
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {selectedTour && shareableTourId && (
+            <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
+                <h3 className="text-sm font-semibold text-emerald-900 mb-4">
+                  🎧 Your Audioguide is Being Created!
+                </h3>
+                <p className="text-xs text-emerald-700 mb-6">
+                  Your personalized audioguide is being generated. Click the button below to view your tour page.
+                </p>
+                <button
+                  onClick={() => window.location.href = `/tour/${shareableTourId}`}
+                  className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                >
+                  🎧 Take me to my audiotour
+                </button>
+                <p className="text-xs text-slate-500 mt-4">
+                  You can share this link with others!
+                </p>
+              </div>
+            </div>
+          )}
+
+
+          {/* Status Message */}
+          {(status !== 'idle' || message) && (
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-700">
+              {message && <p className="mb-1">{message}</p>}
+            </div>
+          )}
+        </div>
+        <div className="mt-8 text-center space-y-1">
+          <p className="text-xs text-slate-300 font-light opacity-80 hover:opacity-100 transition-opacity">
+            Reverse geocoding by{" "}
+            <a href="https://locationiq.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors opacity-50">
+              LocationIQ.com
+            </a>
+          </p>
+          {sessionId && (
+            <p className="text-xs text-slate-300 font-light">{sessionId}</p>
+          )}
+          <p className="text-xs text-slate-300 font-light">v{FRONTEND_VERSION}</p>
+        </div>
       </div>
-      <div className="mt-8 text-center space-y-1">
-        <p className="text-xs text-slate-300 font-light opacity-80 hover:opacity-100 transition-opacity">
-          Reverse geocoding by{" "}
-          <a href="https://locationiq.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors opacity-50">
-            LocationIQ.com
-          </a>
-        </p>
-        {sessionId && (
-          <p className="text-xs text-slate-300 font-light">{sessionId}</p>
-        )}
-        <p className="text-xs text-slate-300 font-light">v{FRONTEND_VERSION}</p>
-      </div>
-
-
     </div>
   )
 }

@@ -46,3 +46,4 @@ inkscape icon-pin.svg --export-width=512 --export-filename=icon-pin-512.png
 ## הערה:
 אם לא תיצור את קבצי ה-PNG, הקוד ישתמש ב-SVG כ-fallback, אבל PNG מומלץ יותר לתמיכה טובה יותר בכל המכשירים.
 
+
