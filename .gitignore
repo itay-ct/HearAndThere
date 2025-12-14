@@ -1,0 +1,9 @@
+# קבצי מערכת של Mac שיש להתעלם מהם
+.DS_Store
+
+# קבצי סביבה (secrets)
+.env
+.env.local
+
+# תיקיות שנוצרות אוטומטית (כמו מודולים של Node)
+node_modules
