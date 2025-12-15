@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Play, Pause, ChevronDown, ChevronUp } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
-  ? 'https://api.hearnthere.com:8080'
+  ? 'https://api.hearnthere.com'
   : 'http://localhost:4000'
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 const FRONTEND_VERSION = __APP_VERSION__ // Injected from package.json by Vite
