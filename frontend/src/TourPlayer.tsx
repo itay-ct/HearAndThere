@@ -111,6 +111,9 @@ export default function TourPlayer() {
           throw new Error('Tour not found')
         }
         const data = await response.json()
+        console.log('[TourPlayer] Tour data loaded:', data)
+        console.log('[TourPlayer] areaContext:', data.areaContext)
+        console.log('[TourPlayer] neighborhoodData:', data.areaContext?.neighborhoodData)
         setTourData(data)
         setLoading(false)
       } catch (err) {

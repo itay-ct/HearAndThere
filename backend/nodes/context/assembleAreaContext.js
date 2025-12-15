@@ -224,6 +224,9 @@ export function createAssembleAreaContextNode({ sessionId, redisClient }) {
         neighborhoodData: {
           summary: neighborhoodData.summary,
           keyFacts: neighborhoodData.keyFacts,
+          intro_script: neighborhoodData.intro_script || null,
+          intro_audio_url: neighborhoodData.intro_audio_url || null,
+          intro_audio_status: neighborhoodData.intro_audio_status || 'pending',
         },
       };
 
@@ -271,7 +274,13 @@ export function createAssembleAreaContextNode({ sessionId, redisClient }) {
           neighborhood: null,
           pois: [],
           cityData: { summary: null, keyFacts: null },
-          neighborhoodData: { summary: null, keyFacts: null }
+          neighborhoodData: {
+            summary: null,
+            keyFacts: null,
+            intro_script: null,
+            intro_audio_url: null,
+            intro_audio_status: 'pending'
+          }
         }
       };
     }
