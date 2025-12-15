@@ -632,6 +632,49 @@ async function start() {
         tourData.startLongitude = startLongitude;
       }
 
+      // MIGRATION: If old tour is missing neighborhood intro fields, fetch from cache
+      if (tourData.areaContext?.neighborhoodData &&
+          !tourData.areaContext.neighborhoodData.intro_audio_url &&
+          tourData.areaContext.neighborhood &&
+          tourData.areaContext.city) {
+
+        // Try to get country from tour data, or use reverse geocoding
+        let country = tourData.areaContext.country;
+
+        if (!country && tourData.startLatitude && tourData.startLongitude) {
+          try {
+            const { reverseGeocode } = await import('./utils/geocodingHelpers.js');
+            const geocodeResult = await reverseGeocode(tourData.startLatitude, tourData.startLongitude);
+            country = geocodeResult.country;
+          } catch (err) {
+            console.error('[api] Reverse geocode failed:', err);
+          }
+        }
+
+        if (country) {
+          try {
+            const { readSummaryFromCache } = await import('./utils/geocodingHelpers.js');
+            const cachedNeighborhoodData = await readSummaryFromCache(
+              redisClient,
+              country,
+              tourData.areaContext.city,
+              tourData.areaContext.neighborhood
+            );
+
+            if (cachedNeighborhoodData?.intro_audio_url) {
+              tourData.areaContext.neighborhoodData.intro_script = cachedNeighborhoodData.intro_script;
+              tourData.areaContext.neighborhoodData.intro_audio_url = cachedNeighborhoodData.intro_audio_url;
+              tourData.areaContext.neighborhoodData.intro_audio_status = cachedNeighborhoodData.intro_audio_status;
+
+              // Update the tour document in Redis with the new fields
+              await redisClient.json.set(tourDataKey, '$.areaContext.neighborhoodData', tourData.areaContext.neighborhoodData);
+            }
+          } catch (err) {
+            console.error('[api] Failed to fetch neighborhood intro from cache:', err);
+          }
+        }
+      }
+
       // Return the complete tour document (includes tour, scripts, audioFiles, etc.)
       res.json(tourData);
     } catch (err) {

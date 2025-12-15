@@ -111,9 +111,7 @@ export default function TourPlayer() {
           throw new Error('Tour not found')
         }
         const data = await response.json()
-        console.log('[TourPlayer] Tour data loaded:', data)
-        console.log('[TourPlayer] areaContext:', data.areaContext)
-        console.log('[TourPlayer] neighborhoodData:', data.areaContext?.neighborhoodData)
+
         setTourData(data)
         setLoading(false)
       } catch (err) {
@@ -519,11 +517,16 @@ export default function TourPlayer() {
                           <h3 className="text-lg font-semibold text-slate-900">
                             {tourData.areaContext.neighborhood || 'Neighborhood'} Introduction
                           </h3>
-                          <p className="text-xs text-slate-500">
-                            {tourData.areaContext.neighborhoodData.intro_audio_url
-                              ? 'Introduction - Where are we now?'
-                              : 'While your audioguide is being prepared...'}
-                          </p>
+                          {(() => {
+                            const neighborhoodIntroReady = tourData.areaContext.neighborhoodData.intro_audio_url;
+                            const tourIntroReady = tourData.audioFiles?.intro?.url;
+
+                            // Only show subtitle if neighborhood intro is ready AND tour intro is NOT ready
+                            if (neighborhoodIntroReady && !tourIntroReady) {
+                              return <p className="text-xs text-slate-500">While your audioguide is being prepared...</p>;
+                            }
+                            return null;
+                          })()}
                         </div>
 
                         {/* Show script button or generating indicator */}

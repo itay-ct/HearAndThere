@@ -434,7 +434,7 @@ export async function writeSummaryToCache(redisClient, country, city, neighborho
  * @param {string} neighborhood - Neighborhood name (optional)
  * @returns {Object|null} Summary object with { summary, keyFacts } or null if not found
  */
-export function readSummaryFromCache(redisClient, country, city, neighborhood) {
+export async function readSummaryFromCache(redisClient, country, city, neighborhood) {
   if (!redisClient) {
     debugLog('readSummaryFromCache: missing redisClient');
     return null;
@@ -474,7 +474,7 @@ export function readSummaryFromCache(redisClient, country, city, neighborhood) {
 
   try {
     // Use Redis JSON.GET to retrieve the summary as JSON
-    const cached = redisClient.json.get(cacheKey);
+    const cached = await redisClient.json.get(cacheKey);
     if (cached) {
       console.log(`[geocodingHelpers] ✅ Cache hit at ${cacheKey}`);
       return cached;
@@ -699,7 +699,14 @@ export async function generateNeighborhoodSummary(neighborhood, city = null, cou
     const cached = await readSummaryFromCache(redisClient, country, city, neighborhood);
     if (cached) {
       console.log(`[geocodingHelpers] Using cached neighborhood summary for ${neighborhood}, ${city}, ${country}`);
-      return cached;
+
+      // MIGRATION: If cache is missing intro_script, regenerate it
+      if (!cached.intro_script && (cached.summary || cached.keyFacts)) {
+        console.log('[geocodingHelpers] ⚠️ Cache missing intro_script, regenerating...');
+        // Don't return cached data, fall through to regeneration
+      } else {
+        return cached;
+      }
     }
   }
 
