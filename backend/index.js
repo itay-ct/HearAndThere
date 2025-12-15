@@ -39,7 +39,8 @@ async function start() {
 
   // Add logging middleware before CORS
   app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin}`);
+    const origin = req.headers.origin || 'no-origin';
+    console.log(`${req.method} ${req.path} - Origin: ${origin}`);
     next();
   });
 
@@ -52,7 +53,7 @@ async function start() {
       'https://www.hearnthere.com',  // Production frontend domain
       'https://hearnthere.com',      // Production frontend domain (without www)
     ],
-    credentials: true
+    credentials: false  // Changed to false - we don't use cookies/auth
   }));
   app.use(express.json());
 
