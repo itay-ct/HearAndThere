@@ -224,7 +224,9 @@ function App() {
           const progress = await res.json()
           console.log('[Progress] Received:', progress)
           const nextMessage = mapStageToMessage(progress.stage, progress.tourCount)
-          setMessage(nextMessage)
+          if (nextMessage) {
+            setMessage(nextMessage)
+          }
 
           // Update tours progressively as they arrive
           if (progress.tours && Array.isArray(progress.tours) && progress.tours.length > 0) {
@@ -262,7 +264,9 @@ function App() {
             // Only stop rotating messages when ALL tours are complete
             console.log('[Progress] ⏹️ Stopping rotation - all tours complete')
             stopRotatingMessages()
-            setLoadingStatus(nextMessage)
+            const finalMessage = nextMessage || loadingStatus || 'Tours ready!'
+            console.log('[Progress] Setting final loadingStatus:', finalMessage)
+            setLoadingStatus(finalMessage)
           }
         } catch (err) {
           console.error('Progress polling failed:', err)
@@ -612,7 +616,7 @@ function App() {
       setMessage(
         finalTourCount > 0
           ? mapStageToMessage('tours_ranked', finalTourCount)
-          : '', // Don't show message if no tours
+          : message // Keep existing message instead of empty string
       )
     } catch (error) {
       stopProgressPolling()
@@ -1008,7 +1012,7 @@ function App() {
               alt="Pin icon"
               className="h-[34px] w-auto"
             />
-            <span className="text-2xl text-slate-900">Hear & There</span>
+            <span className="text-2xl font-bold text-slate-900">Hear & There</span>
           </div>
         </div>
         <div className="w-full max-w-2xl space-y-6">
@@ -1170,7 +1174,7 @@ function App() {
                   <textarea
                     value={customization}
                     onChange={(e) => setCustomization(e.target.value)}
-                    placeholder="E.g., 'Make it a circular route', 'Focus on street art', 'Show me hidden gems', 'Add food stops'"
+                    placeholder="E.g., 'I want to learn about...', 'Focus on street art', 'Show me hidden gems', 'Add food stops'"
                     rows={3}
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:border-sky-500/70 resize-none"
                   />
@@ -1202,14 +1206,14 @@ function App() {
                   if (status === 'saving' && tours.length === 0) {
                     await handleCancelTourGeneration()
                   } else {
-                    // Otherwise just go back
+                    // Otherwise just go back - don't clear loadingStatus
                     setShowTourSuggestions(false)
                     setToursGenerated(false)
                     setTours([])
                     setSelectedTour(null)
                     setSelectedTourId(null)
                     setMessage('')
-                    setLoadingStatus('')
+                    // Remove this line: setLoadingStatus('')
                   }
                 }}
                 neighborhood={neighborhood}
@@ -1360,7 +1364,7 @@ function App() {
 
 
           {/* Status Message */}
-          {(status !== 'idle' || message) && (
+          {false && (status !== 'idle' || message) && (
             <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-700">
               {message && <p className="mb-1">{message}</p>}
             </div>

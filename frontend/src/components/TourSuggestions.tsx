@@ -70,8 +70,8 @@ export function TourSuggestions({
       </button>
 
       <header className="mb-6 text-center">
-        <p className="text-sm text-slate-600">
-          {isLoading && tours.length === 0 ? (
+        <p className="text-lg font-light text-slate-900 px-2 sm:px-0">
+          {isLoading ? (
             <span className="inline-flex items-center gap-2">
               <span className="relative flex size-3">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
@@ -79,13 +79,10 @@ export function TourSuggestions({
               </span>
               {stageMessage || 'Looking around you...'}
             </span>
-          ) : tours.length > 0 ? (
-            <span className="inline-flex items-center gap-2">
-              <LucideIcons.Waypoints className="w-3 h-3 text-sky-500" />
-              {stageMessage || 'Here are a few routes we prepared for you.'}
-            </span>
           ) : (
-            stageMessage
+            <span className="inline-flex items-center gap-2">
+              {stageMessage}
+            </span>
           )}
         </p>
       </header>
