@@ -396,95 +396,38 @@ export async function generateToursWithGemini({
   // Check for cancellation before expensive Gemini call
   await checkCancellation(sessionId, redisClient, 'generateToursWithGemini');
 
-  // STREAMING MODE
-  if (streaming) {
-    console.log('[tourHelpers] 🌊 Starting streaming tour generation...');
+  // STREAMING MODE (always enabled)
+  console.log('[tourHelpers] 🌊 Starting streaming tour generation...');
 
-    // Wrap streaming call with traceable for LangSmith observability
-    const generateToursStreamingTraceable = traceable(
-      async function* (promptText) {
-        // Use streaming with structured output
-        const streamResult = await model.generateContentStream({
-          contents: [{ role: 'user', parts: [{ text: promptText }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: tourGenerationSchema, // Now uses the same unified schema
-          },
-        });
-
-        // Create async generator for text chunks
-        async function* textChunks() {
-          for await (const chunk of streamResult.stream) {
-            const chunkText = chunk.text();
-            if (chunkText) {
-              yield chunkText;
-            }
-          }
-        }
-
-        // Extract and yield tours as they become complete
-        for await (const tour of extractToursFromStream(textChunks())) {
-          yield tour;
-        }
-      },
-      {
-        name: 'generate_tours_with_gemini_streaming',
-        run_type: 'llm',
-        metadata: {
-          model: GEMINI_MODEL,
-          latitude,
-          longitude,
-          durationMinutes,
-          city,
-          neighborhood,
-          poiCount: allPois.length,
-          language,
-          streaming: true,
-        },
-      }
-    );
-
-    // Return an async generator that yields tours as they're streamed
-    return (async function* () {
-      try {
-        for await (const tour of generateToursStreamingTraceable(prompt)) {
-          yield tour;
-        }
-      } catch (err) {
-        console.error('[tourHelpers] ❌ Streaming failed:', err);
-        debugLog('generateToursWithGemini (streaming): error', err?.message || err);
-        // Yield fallback tours
-        const fallbackTours = fallback();
-        for (const tour of fallbackTours) {
-          yield tour;
-        }
-      }
-    })();
-  }
-
-  // NON-STREAMING MODE (original implementation)
-  // Wrap Gemini call with traceable for LangSmith observability
-  const generateToursTraceable = traceable(
-    async (promptText) => {
-      // Use structured output with JSON schema
-      const result = await model.generateContent({
+  // Wrap streaming call with traceable for LangSmith observability
+  const generateToursStreamingTraceable = traceable(
+    async function* (promptText) {
+      // Use streaming with structured output
+      const streamResult = await model.generateContentStream({
         contents: [{ role: 'user', parts: [{ text: promptText }] }],
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: tourGenerationSchema, // Now uses the unified schema
+          responseSchema: tourGenerationSchema,
         },
       });
 
-      const response = result.response;
-      const text = response.text();
+      // Create async generator for text chunks
+      async function* textChunks() {
+        for await (const chunk of streamResult.stream) {
+          const chunkText = chunk.text();
+          if (chunkText) {
+            yield chunkText;
+          }
+        }
+      }
 
-      debugLog('generateToursWithGemini: structured output response length', text.length);
-      debugLog('generateToursWithGemini: structured output preview:', text.substring(0, 500));
-
-      return text;
+      // Extract and yield tours as they become complete
+      for await (const tour of extractToursFromStream(textChunks())) {
+        yield tour;
+      }
     },
     {
-      name: 'generate_tours_with_gemini',
+      name: 'generate_tours_with_gemini_streaming',
       run_type: 'llm',
       metadata: {
         model: GEMINI_MODEL,
@@ -495,56 +438,26 @@ export async function generateToursWithGemini({
         neighborhood,
         poiCount: allPois.length,
         language,
-        streaming: false,
+        streaming: true,
       },
     }
   );
 
+  // Return an async generator that yields tours as they're streamed
   try {
-    // Race the Gemini call against periodic cancellation checks
-    // This allows us to interrupt even during the Gemini API call
-    const geminiCallPromise = generateToursTraceable(prompt);
-
-    // Create a cancellation checker that polls every 500ms
-    const cancellationPromise = new Promise((_, reject) => {
-      const checkInterval = setInterval(async () => {
-        try {
-          await checkCancellation(sessionId, redisClient, 'generateToursWithGemini');
-        } catch (err) {
-          clearInterval(checkInterval);
-          reject(err);
-        }
-      }, 500);
-
-      // Clean up interval when Gemini call completes
-      geminiCallPromise.finally(() => clearInterval(checkInterval));
-    });
-
-    const text = await Promise.race([geminiCallPromise, cancellationPromise]);
-
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      console.warn('[tourHelpers] Failed to parse structured output JSON; falling back.', err);
-      debugLog('generateToursWithGemini: JSON.parse failed', err?.message || err);
-      return fallback();
-    }
-
-    console.log('[tourHelpers] generateToursWithGemini: parsed array length:', parsed.length);
-    const tours = Array.isArray(parsed) ? parsed : [];
-    console.log('[tourHelpers] generateToursWithGemini: tours array length:', tours.length);
-    debugLog('generateToursWithGemini: parsed tours count', tours.length);
-
-    if (!tours.length) {
-      return fallback();
-    }
-
-    return tours;
+    return (async function* () {
+      for await (const tour of generateToursStreamingTraceable(prompt)) {
+        yield tour;
+      }
+    })();
   } catch (err) {
-    console.warn('[tourHelpers] Gemini request failed; falling back to heuristics.', err);
-    debugLog('generateToursWithGemini: request threw, using fallback', err?.message || err);
-    return fallback();
+    console.error('[tourHelpers] ❌ Streaming failed:', err);
+    debugLog('generateToursWithGemini (streaming): error', err?.message || err);
+    // Yield fallback tours
+    const fallbackTours = fallback();
+    for (const tour of fallbackTours) {
+      yield tour;
+    }
   }
 }
 
