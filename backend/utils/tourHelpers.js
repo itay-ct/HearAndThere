@@ -286,8 +286,8 @@ export async function generateToursWithGemini({
   // Helper function to format POI with index number
   const formatPoi = (poi, index, isFood = false) => {
     const poiNumber = index + 1; // 1-based indexing
-    const lat = poi.latitude;
-    const lon = poi.longitude;
+    const lat = poi.latitude.toFixed(5);
+    const lon = poi.longitude.toFixed(5);
     const types = Array.isArray(poi.types) && poi.types.length > 0 ? poi.types.join(', ') : 'general';
     const rating = poi.rating ? poi.rating.toFixed(1) : 'N/A';
     const foodMarker = isFood ? ' [FOOD]' : '';
@@ -366,7 +366,7 @@ export async function generateToursWithGemini({
 
   inputParts.push('=== AVAILABLE POINTS OF INTEREST ===');
   inputParts.push('Format: NUMBER. NAME / LATITUDE / LONGITUDE / TYPES / RATING');
-  inputParts.push('IMPORTANT: In your response, return ONLY the NUMBER (poiIndex) for each stop. Do not include name, latitude, or longitude in the stops array.');
+  inputParts.push('IMPORTANT: Return ONLY the NUMBER (poiIndex) for each stop. ');
 
   if (shouldIncludeFood) {
     inputParts.push('Note: POIs marked with [FOOD] are food establishments. For tours 2+ hours, include at least one highly-rated [FOOD] POI.');
