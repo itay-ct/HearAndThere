@@ -284,7 +284,7 @@ export async function generateToursWithGemini({
     `The total tour should take approximately ${Math.round(durationMinutes * 0.8)} minutes.`,
 
     languageInstruction,
-    // customizationInstruction,
+    customizationInstruction,
     responseFormatInstruction,
     //    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
     //    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
@@ -318,6 +318,7 @@ export async function generateToursWithGemini({
     : 'No POIs available';
 
   // Format city context
+  /*
   let cityContextText = '';
   if (cityData) {
     cityContextText = `City: ${city}\n${cityData.summary || ''}`;
@@ -334,6 +335,7 @@ export async function generateToursWithGemini({
       neighborhoodContextText += '\nKey Facts:\n' + neighborhoodData.keyFacts.map(f => `- ${f}`).join('\n');
     }
   }
+    */
 
   // Build input array with simplified format
   const inputParts = [
