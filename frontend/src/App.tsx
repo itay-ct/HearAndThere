@@ -1217,6 +1217,7 @@ function App() {
                 isLoading={status === 'saving'}
                 loadingStatus={loadingStatus}
                 loadingIcon={loadingIcon}
+                stageMessage={message} // Add this line - use the same message that shows at bottom
                 expectedTourCount={4}
                 interestingMessages={interestingMessages}
                 currentMessageIndex={currentMessageIndex}

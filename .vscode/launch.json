@@ -11,7 +11,7 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "runtimeExecutable": "/usr/local/bin/node",
+            "runtimeExecutable": "/opt/homebrew/bin/node",
             "program": "${workspaceFolder}/backend/index.js",
             "cwd": "${workspaceFolder}/backend",
             "env": {

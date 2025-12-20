@@ -28,6 +28,7 @@ type TourSuggestionsProps = {
   isLoading: boolean
   loadingStatus: string
   loadingIcon: string
+  stageMessage?: string // Add this prop for dynamic status
   expectedTourCount?: number // Expected total number of tours (for progressive loading)
   interestingMessages?: Array<{ icon: string; message: string }>
   currentMessageIndex?: number
@@ -43,6 +44,7 @@ export function TourSuggestions({
   isLoading,
   loadingStatus,
   loadingIcon,
+  stageMessage, // Add this parameter
   expectedTourCount = 4, // Default to 4 tours
   interestingMessages = [],
   currentMessageIndex = 0
@@ -68,22 +70,22 @@ export function TourSuggestions({
       </button>
 
       <header className="mb-6 text-center">
-        <h1 className="text-3xl font-semibold text-slate-900 mb-2">
-          {isLoading ? 'Preparing Your Tours' : 'Choose Your Tour'}
-        </h1>
         <p className="text-sm text-slate-600">
-          {isLoading ? (
+          {isLoading && tours.length === 0 ? (
             <span className="inline-flex items-center gap-2">
               <span className="relative flex size-3">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
                 <span className="relative inline-flex size-3 rounded-full bg-sky-500"></span>
               </span>
-              Looking around you...
+              {stageMessage || 'Looking around you...'}
+            </span>
+          ) : tours.length > 0 ? (
+            <span className="inline-flex items-center gap-2">
+              <LucideIcons.Waypoints className="w-3 h-3 text-sky-500" />
+              {stageMessage || 'Here are a few routes we prepared for you.'}
             </span>
           ) : (
-            neighborhood || city
-              ? `Starting near ${neighborhood || city}.`
-              : 'Here are a few routes we prepared for you.'
+            stageMessage
           )}
         </p>
       </header>
