@@ -318,24 +318,32 @@ export async function generateToursWithGemini({
     : 'No POIs available';
 
   // Format city context
-  /*
+  const INCLUDE_DETAILED_CONTEXT = false; // Set to true to include summaries and key facts on city and neighbourhood
+  
   let cityContextText = '';
-  if (cityData) {
-    cityContextText = `City: ${city}\n${cityData.summary || ''}`;
-    if (cityData.keyFacts && cityData.keyFacts.length > 0) {
-      cityContextText += '\nKey Facts:\n' + cityData.keyFacts.map(f => `- ${f}`).join('\n');
+  if (cityData && city) {
+    if (INCLUDE_DETAILED_CONTEXT) {
+      cityContextText = `City: ${city}\n${cityData.summary || ''}`;
+      if (cityData.keyFacts && cityData.keyFacts.length > 0) {
+        cityContextText += '\nKey Facts:\n' + cityData.keyFacts.map(f => `- ${f}`).join('\n');
+      }
+    } else {
+      cityContextText = `City: ${city}`;
     }
   }
 
   // Format neighborhood context
   let neighborhoodContextText = '';
-  if (neighborhoodData) {
-    neighborhoodContextText = `Neighborhood: ${neighborhood}\n${neighborhoodData.summary || ''}`;
-    if (neighborhoodData.keyFacts && neighborhoodData.keyFacts.length > 0) {
-      neighborhoodContextText += '\nKey Facts:\n' + neighborhoodData.keyFacts.map(f => `- ${f}`).join('\n');
+  if (neighborhoodData && neighborhood) {
+    if (INCLUDE_DETAILED_CONTEXT) {
+      neighborhoodContextText = `Neighborhood: ${neighborhood}\n${neighborhoodData.summary || ''}`;
+      if (neighborhoodData.keyFacts && neighborhoodData.keyFacts.length > 0) {
+        neighborhoodContextText += '\nKey Facts:\n' + neighborhoodData.keyFacts.map(f => `- ${f}`).join('\n');
+      }
+    } else {
+      neighborhoodContextText = `Neighborhood: ${neighborhood}`;
     }
   }
-    */
 
   // Build input array with simplified format
   const inputParts = [
