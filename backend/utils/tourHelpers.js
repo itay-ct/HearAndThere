@@ -453,11 +453,13 @@ export async function generateToursWithGemini({
   } catch (err) {
     console.error('[tourHelpers] ❌ Streaming failed:', err);
     debugLog('generateToursWithGemini (streaming): error', err?.message || err);
-    // Yield fallback tours
-    const fallbackTours = fallback();
-    for (const tour of fallbackTours) {
-      yield tour;
-    }
+    // Return fallback tours as an async generator
+    return (async function* () {
+      const fallbackTours = fallback();
+      for (const tour of fallbackTours) {
+        yield tour;
+      }
+    })();
   }
 }
 
