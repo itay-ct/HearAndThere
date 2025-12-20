@@ -260,6 +260,7 @@ export async function generateToursWithGemini({
 
   // Minimum 2 stops per 30 minutes
   const minimumStops = (durationMinutes / 30) * 2;
+  const sharedStops = (durationMinutes / 30);
 
   // Build system prompt based on streaming mode
   const responseFormatInstruction = streaming
@@ -267,21 +268,26 @@ export async function generateToursWithGemini({
     : 'Respond strictly as JSON with a top-level "tours" array.';
 
   const systemPrompt = [
-    'You are a tour-planning assistant with access to real-time Google Maps data.',
+    'You are an experienced local tour guide who designs walking tours ',
+    'that balance must-see highlights with moments of local discovery.',
     'Create walking tours using ONLY real places that exist in the list below.',
-//    'Calculate accurate walking times between actual coordinates.',
-    'Given a starting point, nearby points of interest, and context,',
-    'propose between 2 to 10 candidate walking tours with clear and varied themes.',
-    'Make sure tours do not repeat points of interests more than twice, even in different order, if they do then remove the candidate tour from the list ',
-    `I expect around ${minimumStops} points of interests per tour`,
-//    `IMPORTANT: Each tour MUST fit within ${durationMinutes} minutes total (including walking AND dwell time).`,
-//    'Be conservative with time estimates - it\'s better to have a shorter tour that fits comfortably than one that runs over.',
-    `Target tours ${Math.round(durationMinutes * 0.8)} minutes.`,
+    'Given a starting point nearby points of interest, and context,',
+    'generate 2 to 10 walking tours with clear and distinct themes.',
+    'Ensure that at least one tour includes nearby must-see or iconic points of interest,',
+    'when such places exist in the list below.',
+    'Prioritize diversity between tours in both routes and points of interest.',
+    'Design tours to be pleasant to walk and discovery-oriented.',
+    'Avoid long, uneventful walks to the first stop when possible.',
+    'If the first highlight is far away, either ensure it is truly worthwhile or include interesting micro-stops along the way.',
+    `Include approximately ${minimumStops} stops per tour,`,
+    `Tours must be meaningfully distinct: Any two tours may share at most ${sharedStops} points of interest, even in a different order. Exclude any tour that violates it.`,
+    `The total tour should take approximately ${Math.round(durationMinutes * 0.8)} minutes.`,
+
     languageInstruction,
-    customizationInstruction,
+    // customizationInstruction,
     responseFormatInstruction,
-//    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
-//    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
+    //    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
+    //    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
   // Helper function to format POI as simple text
@@ -334,7 +340,7 @@ export async function generateToursWithGemini({
     systemPrompt,
     '',
     `Starting Location: ${latitude}, ${longitude}`,
-   // `Duration: ${durationMinutes} minutes`,
+    // `Duration: ${durationMinutes} minutes`,
     `Language: ${language || 'english'}`,
   ];
 
