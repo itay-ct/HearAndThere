@@ -81,7 +81,7 @@ export function TourSuggestions({
             </span>
           ) : (
             <span className="inline-flex items-center gap-2">
-              {stageMessage}
+              {`We've prepared ${tours.length} tours for you. Pick the one that fits your mood.`}
             </span>
           )}
         </p>

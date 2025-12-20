@@ -60,6 +60,7 @@ function App() {
   const [showTourSuggestions, setShowTourSuggestions] = useState<boolean>(false)
   const [interestingMessages, setInterestingMessages] = useState<Array<{ icon: string; message: string }>>([])
   const [currentMessageIndex, setCurrentMessageIndex] = useState<number>(0)
+  const [persistentStageMessage, setPersistentStageMessage] = useState<string>('')
 
   const progressIntervalRef = useRef<number | null>(null)
   const audioguidePollingRef = useRef<number | null>(null)
@@ -183,21 +184,32 @@ function App() {
 
   const mapStageToMessage = useCallback(
     (stage: string | null | undefined, tourCount: number | null | undefined) => {
+      let newMessage = '';
       if (tourCount && tourCount > 0) {
-        return `We've prepared ${tourCount} tours for you. Pick the one that fits your mood.`
+        newMessage = `We've prepared ${tourCount} tours for you. Pick the one that fits your mood.`
+      } else {
+        switch (stage) {
+          case 'area_context_built':
+          case 'context_collected':
+            newMessage = 'Investigating the area...'
+            break
+          case 'candidates_generated':
+            newMessage = 'Generating tour suggestions...'
+            break
+          case 'tours_ranked':
+            newMessage = 'Finalizing your tours...'
+            break
+          default:
+            newMessage = 'Looking what\'s around...'
+        }
       }
-
-      switch (stage) {
-        case 'area_context_built':
-        case 'context_collected':
-          return 'Investigating the area...'
-        case 'candidates_generated':
-          return 'Generating tour suggestions...'
-        case 'tours_ranked':
-          return 'Finalizing your tours...'
-        default:
-          return 'Looking what\'s around...'
+      
+      // Always update persistent message when we have a new one
+      if (newMessage) {
+        setPersistentStageMessage(newMessage)
       }
+      
+      return newMessage
     },
     [],
   )
@@ -1221,7 +1233,7 @@ function App() {
                 isLoading={status === 'saving'}
                 loadingStatus={loadingStatus}
                 loadingIcon={loadingIcon}
-                stageMessage={message} // Add this line - use the same message that shows at bottom
+                stageMessage={persistentStageMessage} // Use persistent message instead
                 expectedTourCount={4}
                 interestingMessages={interestingMessages}
                 currentMessageIndex={currentMessageIndex}
