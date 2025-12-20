@@ -1,5 +1,4 @@
 import { TourLoadingCard } from './TourLoadingCard'
-import * as LucideIcons from 'lucide-react'
 
 type TourStop = {
   name: string
@@ -39,11 +38,7 @@ export function TourSuggestions({
   selectedTourId,
   onSelectTour,
   onGoBack,
-  neighborhood,
-  city,
   isLoading,
-  loadingStatus,
-  loadingIcon,
   stageMessage, // Add this parameter
   expectedTourCount = 4, // Default to 4 tours
   interestingMessages = [],
@@ -105,7 +100,7 @@ export function TourSuggestions({
                     <h2 className="text-sm font-semibold text-slate-900">{tour.title}</h2>
                   </div>
 
-                  <span className="inline-flex items-center justify-center text-center w-24 rounded-2xl border border-sky-200 bg-sky-50 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-tight text-sky-700">
+                  <span className="inline-flex items-center justify-center text-center w-24 rounded-2xl border border-sky-200 bg-sky-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-tight text-sky-700">
                     {tour.theme}
                   </span>
                 </div>

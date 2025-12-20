@@ -48,7 +48,7 @@ function App() {
   const [audioguideGenerating, setAudioguideGenerating] = useState<boolean>(false)
   const [audioguideData, setAudioguideData] = useState<any>(null)
   const [audioguideError, setAudioguideError] = useState<string | null>(null)
-  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
+  const [] = useState<string | null>(null)
   const [toursGenerated, setToursGenerated] = useState<boolean>(false)
   const [shareableTourId, setShareableTourId] = useState<string | null>(null)
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
@@ -816,38 +816,7 @@ function App() {
     }
   }, [sessionId, selectedTour, selectedVoice, startAudioguidePolling])
 
-  const handlePlayAudio = useCallback((audioUrl: string, audioId: string) => {
-    // Stop currently playing audio
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current = null
-    }
 
-    // If clicking the same audio, just pause
-    if (playingAudioId === audioId) {
-      setPlayingAudioId(null)
-      return
-    }
-
-    // Play new audio - audioUrl is already a full GCS URL
-    const audio = new Audio(audioUrl)
-    audio.play()
-    audioRef.current = audio
-    setPlayingAudioId(audioId)
-
-    audio.onended = () => {
-      setPlayingAudioId(null)
-      audioRef.current = null
-    }
-  }, [playingAudioId])
-
-  const handlePauseAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current = null
-    }
-    setPlayingAudioId(null)
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -1009,7 +978,7 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50/30 via-white to-teal-50/20 relative overflow-hidden text-slate-900 flex flex-col items-center px-4 py-10">
+    <div className="min-h-screen bg-linear-to-br from-cyan-50/30 via-white to-teal-50/20 relative overflow-hidden text-slate-900 flex flex-col items-center px-4 py-10">
       {/* Decorative blur circles */}
       <div className="absolute top-0 right-0 w-96 h-96 bg-cyan-200/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-teal-200/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2" />

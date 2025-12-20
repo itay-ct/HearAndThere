@@ -42,7 +42,7 @@ async function getGeminiModel() {
 }
 
 // Define unified JSON schema for tour generation (top-level array for both streaming and non-streaming)
-// Optimized to only require placeId - coordinates and names will be enriched from Redis cache
+// Optimized to only require poiIndex - a simple number referencing the POI list position
 const tourGenerationSchema = {
   type: "array",
   items: {
@@ -73,9 +73,9 @@ const tourGenerationSchema = {
         items: {
           type: "object",
           properties: {
-            placeId: {
-              type: "string",
-              description: "Google Place ID of the stop/POI"
+            poiIndex: {
+              type: "integer",
+              description: "Index number of the POI from the provided list (starting from 1)"
             },
             dwellMinutes: {
               type: "number",
@@ -86,7 +86,7 @@ const tourGenerationSchema = {
               description: "Walking time from previous stop in minutes (0 for first stop)"
             }
           },
-          required: ["placeId", "dwellMinutes", "walkMinutesFromPrevious"]
+          required: ["poiIndex", "dwellMinutes", "walkMinutesFromPrevious"]
         }
       }
     },
@@ -283,15 +283,15 @@ export async function generateToursWithGemini({
     //    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
-  // Helper function to format POI as simple text with placeId
-  const formatPoi = (poi, isFood = false) => {
-    const placeId = poi.id;
+  // Helper function to format POI with index number
+  const formatPoi = (poi, index, isFood = false) => {
+    const poiNumber = index + 1; // 1-based indexing
     const lat = poi.latitude;
     const lon = poi.longitude;
     const types = Array.isArray(poi.types) && poi.types.length > 0 ? poi.types.join(', ') : 'general';
     const rating = poi.rating ? poi.rating.toFixed(1) : 'N/A';
     const foodMarker = isFood ? ' [FOOD]' : '';
-    return `- ${placeId} / ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
+    return `${poiNumber}. ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
   };
 
   // Merge regular POIs and food POIs into one list
@@ -306,9 +306,9 @@ export async function generateToursWithGemini({
     allPois.push(...foodPois.map(poi => ({ ...poi, _isFood: true })));
   }
 
-  // Format all POIs as simple text list
+  // Format all POIs as numbered list (1-based indexing)
   const poisText = allPois.length > 0
-    ? allPois.map(poi => formatPoi(poi, poi._isFood)).join('\n')
+    ? allPois.map((poi, index) => formatPoi(poi, index, poi._isFood)).join('\n')
     : 'No POIs available';
 
   // Format city context
@@ -365,8 +365,8 @@ export async function generateToursWithGemini({
   }
 
   inputParts.push('=== AVAILABLE POINTS OF INTEREST ===');
-  inputParts.push('Format: PLACEID / NAME / LATITUDE / LONGITUDE / TYPES / RATING');
-  inputParts.push('IMPORTANT: In your response, return ONLY the PLACEID for each stop. Do not include name, latitude, or longitude in the stops array.');
+  inputParts.push('Format: NUMBER. NAME / LATITUDE / LONGITUDE / TYPES / RATING');
+  inputParts.push('IMPORTANT: In your response, return ONLY the NUMBER (poiIndex) for each stop. Do not include name, latitude, or longitude in the stops array.');
 
   if (shouldIncludeFood) {
     inputParts.push('Note: POIs marked with [FOOD] are food establishments. For tours 2+ hours, include at least one highly-rated [FOOD] POI.');
@@ -419,6 +419,16 @@ export async function generateToursWithGemini({
       // Extract and yield tours as they become complete
       for await (const tour of extractToursFromStream(textChunks())) {
         yield tour;
+      }
+
+      // After streaming completes, get the final response with usage metadata
+      const response = await streamResult.response;
+      if (response?.usageMetadata) {
+        const { promptTokenCount, candidatesTokenCount, totalTokenCount } = response.usageMetadata;
+        console.log('[tourHelpers] 📊 Gemini API Token Usage:');
+        console.log(`  - Prompt tokens: ${promptTokenCount || 0}`);
+        console.log(`  - Response tokens: ${candidatesTokenCount || 0}`);
+        console.log(`  - Total tokens: ${totalTokenCount || 0}`);
       }
     },
     {
@@ -505,10 +515,10 @@ export const getWalkingDirections = traceable(async (origin, destination, waypoi
 }, { name: 'getWalkingDirections', run_type: 'tool' });
 
 /**
- * Enrich tour stops with full POI details from placeIds
- * @param {Object} tour - Tour object with stops containing only placeId
- * @param {Array} pois - Array of available POIs with full details
- * @returns {Object} Tour with enriched stops (name, latitude, longitude added)
+ * Enrich tour stops with full POI details from poiIndex
+ * @param {Object} tour - Tour object with stops containing only poiIndex (1-based)
+ * @param {Array} pois - Array of available POIs with full details (0-based array)
+ * @returns {Object} Tour with enriched stops (placeId, name, latitude, longitude added)
  */
 export function enrichTourWithPoiDetails(tour, pois) {
   if (!Array.isArray(tour.stops) || tour.stops.length === 0) {
@@ -521,24 +531,33 @@ export function enrichTourWithPoiDetails(tour, pois) {
     return tour;
   }
 
-  // Create a map of placeId -> POI for fast lookup
-  const poiMap = new Map();
-  for (const poi of pois) {
-    if (poi.id) {
-      poiMap.set(poi.id, poi);
-    }
-  }
+  // Enrich each stop with POI details using array index
+  const enrichedStops = tour.stops.map((stop, stopIndex) => {
+    const poiIndex = stop.poiIndex;
 
-  // Enrich each stop with POI details
-  const enrichedStops = tour.stops.map((stop, index) => {
-    const poi = poiMap.get(stop.placeId);
-
-    if (!poi) {
-      console.warn(`[tourHelpers] ⚠️ POI not found for placeId: ${stop.placeId} (stop ${index})`);
-      // Return stop with placeholder data if POI not found
+    // Validate poiIndex
+    if (!poiIndex || typeof poiIndex !== 'number' || poiIndex < 1 || poiIndex > pois.length) {
+      console.warn(`[tourHelpers] ⚠️ Invalid poiIndex: ${poiIndex} (stop ${stopIndex + 1}). Valid range: 1-${pois.length}`);
+      // Return stop with placeholder data if index is invalid
       return {
         ...stop,
-        name: `Unknown Place (${stop.placeId})`,
+        placeId: 'invalid',
+        name: `Invalid POI Index (${poiIndex})`,
+        latitude: 0,
+        longitude: 0,
+      };
+    }
+
+    // Convert 1-based poiIndex to 0-based array index
+    const arrayIndex = poiIndex - 1;
+    const poi = pois[arrayIndex];
+
+    if (!poi) {
+      console.warn(`[tourHelpers] ⚠️ POI not found at index ${poiIndex} (stop ${stopIndex + 1})`);
+      return {
+        ...stop,
+        placeId: 'not_found',
+        name: `POI Not Found (index ${poiIndex})`,
         latitude: 0,
         longitude: 0,
       };
@@ -546,7 +565,8 @@ export function enrichTourWithPoiDetails(tour, pois) {
 
     // Enrich stop with POI details
     return {
-      placeId: stop.placeId,
+      poiIndex: stop.poiIndex,
+      placeId: poi.id,
       name: poi.name,
       latitude: poi.latitude,
       longitude: poi.longitude,
