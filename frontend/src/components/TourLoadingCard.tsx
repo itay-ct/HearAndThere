@@ -21,8 +21,8 @@ export function TourLoadingCard({ tourNumber, interestingMessage }: TourLoadingC
 
     // If icon not found, use default
     if (!IconComponent) {
-      console.warn(`[TourLoadingCard] Icon "${iconName}" (${pascalCase}) not found in Lucide, using ArrowDownToDot`)
-      return (LucideIcons as any)['ArrowDownToDot'] || null
+      console.warn(`[TourLoadingCard] Icon "${iconName}" (${pascalCase}) not found in Lucide, using MapPin`)
+      return (LucideIcons as any)['MapPin'] || null
     }
 
     return IconComponent
