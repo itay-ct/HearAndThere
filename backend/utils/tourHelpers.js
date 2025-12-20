@@ -42,6 +42,7 @@ async function getGeminiModel() {
 }
 
 // Define unified JSON schema for tour generation (top-level array for both streaming and non-streaming)
+// Optimized to only require placeId - coordinates and names will be enriched from Redis cache
 const tourGenerationSchema = {
   type: "array",
   items: {
@@ -72,17 +73,9 @@ const tourGenerationSchema = {
         items: {
           type: "object",
           properties: {
-            name: {
+            placeId: {
               type: "string",
-              description: "Name of the stop/POI"
-            },
-            latitude: {
-              type: "number",
-              description: "Latitude coordinate"
-            },
-            longitude: {
-              type: "number",
-              description: "Longitude coordinate"
+              description: "Google Place ID of the stop/POI"
             },
             dwellMinutes: {
               type: "number",
@@ -93,7 +86,7 @@ const tourGenerationSchema = {
               description: "Walking time from previous stop in minutes (0 for first stop)"
             }
           },
-          required: ["name", "latitude", "longitude", "dwellMinutes", "walkMinutesFromPrevious"]
+          required: ["placeId", "dwellMinutes", "walkMinutesFromPrevious"]
         }
       }
     },
@@ -290,14 +283,15 @@ export async function generateToursWithGemini({
     //    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
   ].join(' ');
 
-  // Helper function to format POI as simple text
+  // Helper function to format POI as simple text with placeId
   const formatPoi = (poi, isFood = false) => {
+    const placeId = poi.id;
     const lat = poi.latitude;
     const lon = poi.longitude;
     const types = Array.isArray(poi.types) && poi.types.length > 0 ? poi.types.join(', ') : 'general';
     const rating = poi.rating ? poi.rating.toFixed(1) : 'N/A';
     const foodMarker = isFood ? ' [FOOD]' : '';
-    return `- ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
+    return `- ${placeId} / ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
   };
 
   // Merge regular POIs and food POIs into one list
@@ -371,7 +365,8 @@ export async function generateToursWithGemini({
   }
 
   inputParts.push('=== AVAILABLE POINTS OF INTEREST ===');
-  inputParts.push('Format: NAME / LATITUDE / LONGITUDE / TYPES / RATING');
+  inputParts.push('Format: PLACEID / NAME / LATITUDE / LONGITUDE / TYPES / RATING');
+  inputParts.push('IMPORTANT: In your response, return ONLY the PLACEID for each stop. Do not include name, latitude, or longitude in the stops array.');
 
   if (shouldIncludeFood) {
     inputParts.push('Note: POIs marked with [FOOD] are food establishments. For tours 2+ hours, include at least one highly-rated [FOOD] POI.');
@@ -508,6 +503,65 @@ export const getWalkingDirections = traceable(async (origin, destination, waypoi
     throw err;
   }
 }, { name: 'getWalkingDirections', run_type: 'tool' });
+
+/**
+ * Enrich tour stops with full POI details from placeIds
+ * @param {Object} tour - Tour object with stops containing only placeId
+ * @param {Array} pois - Array of available POIs with full details
+ * @returns {Object} Tour with enriched stops (name, latitude, longitude added)
+ */
+export function enrichTourWithPoiDetails(tour, pois) {
+  if (!Array.isArray(tour.stops) || tour.stops.length === 0) {
+    console.warn('[tourHelpers] Cannot enrich tour - no stops found');
+    return tour;
+  }
+
+  if (!Array.isArray(pois) || pois.length === 0) {
+    console.warn('[tourHelpers] Cannot enrich tour - no POIs provided');
+    return tour;
+  }
+
+  // Create a map of placeId -> POI for fast lookup
+  const poiMap = new Map();
+  for (const poi of pois) {
+    if (poi.id) {
+      poiMap.set(poi.id, poi);
+    }
+  }
+
+  // Enrich each stop with POI details
+  const enrichedStops = tour.stops.map((stop, index) => {
+    const poi = poiMap.get(stop.placeId);
+
+    if (!poi) {
+      console.warn(`[tourHelpers] ⚠️ POI not found for placeId: ${stop.placeId} (stop ${index})`);
+      // Return stop with placeholder data if POI not found
+      return {
+        ...stop,
+        name: `Unknown Place (${stop.placeId})`,
+        latitude: 0,
+        longitude: 0,
+      };
+    }
+
+    // Enrich stop with POI details
+    return {
+      placeId: stop.placeId,
+      name: poi.name,
+      latitude: poi.latitude,
+      longitude: poi.longitude,
+      dwellMinutes: stop.dwellMinutes,
+      walkMinutesFromPrevious: stop.walkMinutesFromPrevious,
+    };
+  });
+
+  debugLog(`Enriched ${enrichedStops.length} stops for tour: ${tour.title}`);
+
+  return {
+    ...tour,
+    stops: enrichedStops,
+  };
+}
 
 /**
  * Validate walking times for a single tour using Google Maps Directions API

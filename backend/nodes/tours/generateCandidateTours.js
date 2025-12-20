@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { generateToursWithGemini, validateSingleTour } from '../../utils/tourHelpers.js';
+import { generateToursWithGemini, validateSingleTour, enrichTourWithPoiDetails } from '../../utils/tourHelpers.js';
 import { queryFoodPoisFromRedis } from '../../utils/poiHelpers.js';
 import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
@@ -145,9 +145,13 @@ export function createGenerateCandidateToursNode({
 
         rawTours.push(tourWithId);
 
+        // Enrich tour with POI details (name, lat, lon) from placeIds
+        console.log(`[generateCandidateTours] 🔍 Enriching tour with POI details: ${tourWithId.title}`);
+        const enrichedTour = enrichTourWithPoiDetails(tourWithId, areaContext.pois);
+
         // Validate walking times immediately
-        console.log(`[generateCandidateTours] 🔍 Validating tour: ${tourWithId.title}`);
-        const validatedTour = await validateSingleTour(tourWithId, latitude, longitude);
+        console.log(`[generateCandidateTours] 🔍 Validating tour: ${enrichedTour.title}`);
+        const validatedTour = await validateSingleTour(enrichedTour, latitude, longitude);
         validatedTours.push(validatedTour);
 
         // Send validated tour to Redis immediately so frontend can display it
