@@ -227,7 +227,6 @@ export async function generateToursWithGemini({
   pois,
   cityData,
   neighborhoodData,
-  foodPois = [],
   sessionId = null,
   redisClient = null,
   streaming = false
@@ -284,31 +283,18 @@ export async function generateToursWithGemini({
   ].join(' ');
 
   // Helper function to format POI with index number
-  const formatPoi = (poi, index, isFood = false) => {
+  const formatPoi = (poi, index) => {
     const poiNumber = index + 1; // 1-based indexing
     const lat = poi.latitude.toFixed(5);
     const lon = poi.longitude.toFixed(5);
     const types = Array.isArray(poi.types) && poi.types.length > 0 ? poi.types.join(', ') : 'general';
     const rating = poi.rating ? poi.rating.toFixed(1) : 'N/A';
-    const foodMarker = isFood ? ' [FOOD]' : '';
-    return `${poiNumber}. ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}${foodMarker}`;
+    return `${poiNumber}. ${poi.name} / ${lat} / ${lon} / ${types} / ${rating}`;
   };
 
-  // Merge regular POIs and food POIs into one list
-  const allPois = [...(Array.isArray(pois) ? pois : [])];
-
-  // For tours 2+ hours, add food POIs with [FOOD] marker
-  // DISABLED FOR NOW
-  //const shouldIncludeFood = durationMinutes >= 120 && Array.isArray(foodPois) && foodPois.length > 0;
-  const shouldIncludeFood = false;
-
-  if (shouldIncludeFood) {
-    allPois.push(...foodPois.map(poi => ({ ...poi, _isFood: true })));
-  }
-
   // Format all POIs as numbered list (1-based indexing)
-  const poisText = allPois.length > 0
-    ? allPois.map((poi, index) => formatPoi(poi, index, poi._isFood)).join('\n')
+  const poisText = Array.isArray(pois) && pois.length > 0
+    ? pois.map((poi, index) => formatPoi(poi, index)).join('\n')
     : 'No POIs available';
 
   // Format city context
@@ -367,11 +353,6 @@ export async function generateToursWithGemini({
   inputParts.push('=== AVAILABLE POINTS OF INTEREST ===');
   inputParts.push('Format: NUMBER. NAME / LATITUDE / LONGITUDE / TYPES / RATING');
   inputParts.push('IMPORTANT: Return ONLY the NUMBER (poiIndex) for each stop. ');
-
-  if (shouldIncludeFood) {
-    inputParts.push('Note: POIs marked with [FOOD] are food establishments. For tours 2+ hours, include at least one highly-rated [FOOD] POI.');
-  }
-
   inputParts.push('');
   inputParts.push(poisText);
   inputParts.push('');
@@ -384,7 +365,7 @@ export async function generateToursWithGemini({
     durationMinutes,
     city,
     neighborhood,
-    poiCount: allPois.length,
+    poiCount: pois.length,
     streaming,
   });
 

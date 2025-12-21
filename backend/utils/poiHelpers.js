@@ -250,7 +250,7 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
   // Note: POI caching is now handled by the savePoiToCache node
   // This allows caching to happen asynchronously without blocking the user request
 
-  debugLog('searchNearbyPois: got unique results count', uniqueResults.length);
+  console.log(`[poiHelpers] 📍 POI search results - Primary Group 1: ${primaryResults1.length}, Primary Group 2: ${primaryResults2.length}, Secondary: ${secondaryResults.length}, Total unique: ${uniqueResults.length}`);
 
   // Return all unique results (up to 60 from 3 API calls)
   // Don't limit here - let the caller decide how many to use
@@ -403,95 +403,6 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
   }
 }, { name: 'queryPoisFromRedis', run_type: 'tool' });
 
-/**
- * Query food POIs from Redis using RediSearch FT.AGGREGATE
- * Returns top 15 secondary (primary: false) POIs that include "food" type,
- * sorted by rating (highest first), within the specified radius.
- *
- * Uses FT.AGGREGATE with:
- * - GEO filter for location
- * - TAG filter for primary:false
- * - TAG filter for types containing food-related types
- * - SORTBY rating descending
- * - LIMIT 15
- *
- * @param {number} latitude - Center latitude
- * @param {number} longitude - Center longitude
- * @param {number} radiusMeters - Search radius in meters
- * @param {Object} redisClient - Redis client instance
- * @returns {Promise<Array>} Array of food POI objects
- */
-export const queryFoodPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
-  if (!redisClient) {
-    console.warn('[poiHelpers] No Redis client available for food POI query');
-    return [];
-  }
-
-  // Ensure index exists (safe to call multiple times)
-  await ensurePoiIndexExists(redisClient);
-
-  try {
-    console.log(`[poiHelpers] Querying RediSearch for food POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
-
-    // Build query: GEO filter + primary:false + types containing "food"
-    // Note: Redis Query Engine GEO syntax requires longitude FIRST, then latitude
-    const query = `@location:[${longitude} ${latitude} ${radiusMeters} m] @primary:{false} @types:{food}`;
-
-    debugLog('RediSearch FT.SEARCH food query:', query);
-
-    // Use FT.SEARCH with SORTBY rating descending and LIMIT 15
-    const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
-      SORTBY: {
-        BY: 'rating',
-        DIRECTION: 'DESC'
-      },
-      LIMIT: {
-        from: 0,
-        size: 15
-      }
-    });
-
-    debugLog('RediSearch FT.SEARCH food query returned', results.total, 'results');
-
-    // Parse results from FT.SEARCH
-    const foodPois = [];
-    if (results.documents) {
-      for (const doc of results.documents) {
-        try {
-          const data = doc.value;
-
-          if (data && data.location && data.place_id) {
-            // Parse location string "lon,lat" to extract coordinates
-            const [lon, lat] = data.location.split(',').map(parseFloat);
-
-            foodPois.push({
-              id: data.place_id,
-              name: data.name || 'Unknown Place',
-              latitude: lat,
-              longitude: lon,
-              types: data.types || [],
-              rating: data.rating ? parseFloat(data.rating) : null,
-              primary: data.primary === 'true' || data.primary === true,
-              country: data.country || null,
-              city: data.city || null,
-              neighborhood: data.neighborhood || null
-            });
-          }
-        } catch (err) {
-          console.warn(`[poiHelpers] Failed to parse food POI result:`, err.message);
-        }
-      }
-    }
-
-    console.log(`[poiHelpers] Returning ${foodPois.length} food POIs for tour generation`);
-    return foodPois;
-
-  } catch (err) {
-    console.error('[poiHelpers] Failed to query food POIs from Redis:', err);
-    console.error('[poiHelpers] Query details:', { latitude, longitude, radiusMeters });
-    return [];
-  }
-}, { name: 'queryFoodPoisFromRedis', run_type: 'tool' });
 
 /**
  * Enrich POI with location context (city, neighborhood, and their summaries)

@@ -6,7 +6,6 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { generateToursWithGemini, validateSingleTour, enrichTourWithPoiDetails } from '../../utils/tourHelpers.js';
-import { queryFoodPoisFromRedis } from '../../utils/poiHelpers.js';
 import { checkCancellation, getSessionIdFromState } from '../../utils/cancellationHelper.js';
 
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
@@ -86,30 +85,6 @@ export function createGenerateCandidateToursNode({
       // Check for cancellation before expensive operations
       await checkCancellation(sessionId, redisClient, 'generateCandidateTours');
 
-      // Query food POIs if tour is 2 hours or longer
-      let foodPois = [];
-      if (durationMinutes >= 120 && redisClient) {
-        console.log('[generateCandidateTours] Tour is 2+ hours, querying food POIs...');
-
-        // Calculate radius based on duration (same logic as in queryPois)
-        const walkingTimeMinutes = durationMinutes * 0.4;
-        const maxWalkingMeters = walkingTimeMinutes * 83;
-        const calculatedRadius = Math.round(maxWalkingMeters / 2);
-        const radiusMeters = Math.max(500, Math.min(3000, calculatedRadius));
-
-        try {
-          foodPois = await queryFoodPoisFromRedis(latitude, longitude, radiusMeters, redisClient);
-          console.log(`[generateCandidateTours] Retrieved ${foodPois.length} food POIs`);
-          debugLog('Food POIs:', foodPois.map(p => ({ name: p.name, rating: p.rating })));
-        } catch (err) {
-          console.warn('[generateCandidateTours] Failed to query food POIs:', err);
-          foodPois = [];
-        }
-      }
-
-      // Check for cancellation again before calling Gemini (expensive operation)
-      await checkCancellation(sessionId, redisClient, 'generateCandidateTours');
-
       // Generate tours using Gemini LLM with streaming (always enabled)
       console.log('[generateCandidateTours] 🌊 Starting streaming tour generation...');
       const tourStream = await generateToursWithGemini({
@@ -123,7 +98,6 @@ export function createGenerateCandidateToursNode({
         pois: areaContext.pois,
         cityData: areaContext.cityData,
         neighborhoodData: areaContext.neighborhoodData,
-        foodPois: foodPois,
         sessionId, // Pass sessionId for cancellation checks
         redisClient, // Pass redisClient for cancellation checks
         streaming: true, // Always use streaming for tour generation
