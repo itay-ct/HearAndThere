@@ -16,10 +16,10 @@ function debugLog(...args) {
 
 /**
  * Create the fetchPoisFromGoogleMaps node
- * 
+ *
  * This node fetches POIs from Google Maps API and caches them in Redis.
- * It's only called when the POI cache doesn't have sufficient data (< 40 primary POIs).
- * 
+ * It's only called when the POI cache doesn't have sufficient data (< MAX_POIS_IN_TOURPLAN_CONTEXT primary POIs).
+ *
  * @param {Object} config - Node configuration
  * @param {number} config.latitude - Starting latitude
  * @param {number} config.longitude - Starting longitude

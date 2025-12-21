@@ -10,6 +10,7 @@ import { reverseGeocode, generateCitySummary, generateNeighborhoodSummary } from
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const POI_INDEX_NAME = 'idx:pois';
+const MAX_POIS_IN_TOURPLAN_CONTEXT = 40;
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 function debugLog(...args) {
@@ -38,7 +39,6 @@ export async function ensurePoiIndexExists(redisClient) {
     // Check if index already exists
     try {
       await redisClient.ft.info(POI_INDEX_NAME);
-      console.log(`[poiHelpers] RediSearch index '${POI_INDEX_NAME}' already exists`);
       return true;
     } catch (err) {
       // Index doesn't exist, create it
@@ -253,15 +253,15 @@ export const searchNearbyPois = traceable(async (latitude, longitude, durationMi
 }, { name: 'searchNearbyPois', run_type: 'tool' });
 
 /**
- * Query POIs from Redis using RediSearch FT.AGGREGATE with intelligent fallback logic
- * 1. Query primary POIs within radiusMeters (limited to 40, sorted by distance)
- * 2. If < 40, query all POIs within radiusMeters (limited to 40, sorted by distance)
- * 3. If still < 40, query all POIs within radiusMeters * 1.5 (limited to 40, sorted by distance)
+ * Query POIs from Redis using RediSearch FT.SEARCH with intelligent fallback logic
+ * 1. Query primary POIs within radiusMeters (limited to MAX_POIS_IN_TOURPLAN_CONTEXT, sorted by distance)
+ * 2. If < MAX_POIS_IN_TOURPLAN_CONTEXT, query all POIs within radiusMeters (limited to MAX_POIS_IN_TOURPLAN_CONTEXT, sorted by distance)
+ * 3. If still < MAX_POIS_IN_TOURPLAN_CONTEXT, query all POIs within radiusMeters * 1.5 (limited to MAX_POIS_IN_TOURPLAN_CONTEXT, sorted by distance)
  *
- * Uses FT.AGGREGATE with:
- * - GEODISTANCE to calculate distance from center point
- * - SORTBY to sort by distance ascending
- * - MAX 40 to limit results natively in Redis
+ * Uses FT.SEARCH with:
+ * - GEO query to filter by distance
+ * - LIMIT to cap results at MAX_POIS_IN_TOURPLAN_CONTEXT
+ * - Automatic distance-based sorting
  */
 export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMeters, redisClient) => {
   if (!redisClient) {
@@ -272,123 +272,115 @@ export const queryPoisFromRedis = traceable(async (latitude, longitude, radiusMe
   // Ensure index exists (safe to call multiple times)
   await ensurePoiIndexExists(redisClient);
 
+  // Helper function to execute RediSearch geospatial query and parse results
+  const searchAndParsePois = async (radius, filterPrimary = false) => {
+    // RediSearch GEO query syntax: @location:[lon lat radius unit]
+    let query = `@location:[${longitude} ${latitude} ${radius} m]`;
+    if (filterPrimary) {
+      query += ' @primary:{true}';
+    }
+
+    try {
+      debugLog('RediSearch FT.SEARCH query:', query);
+
+      const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
+        LIMIT: { from: 0, size: MAX_POIS_IN_TOURPLAN_CONTEXT },
+      });
+
+      debugLog('RediSearch FT.SEARCH returned', results.total, 'documents');
+
+      // Parse results from FT.SEARCH
+      const pois = [];
+      if (results.documents) {
+        for (const doc of results.documents) {
+          try {
+            const { value } = doc;
+
+            if (!value) {
+              console.warn(`[poiHelpers] Document has no value:`, doc);
+              continue;
+            }
+
+            // Extract fields from document
+            const locationStr = value.location;
+            const placeId = value.place_id;
+            const name = value.name;
+            const typesRaw = value.types;
+            const rating = value.rating;
+            const primary = value.primary;
+            const country = value.country;
+            const city = value.city;
+            const neighborhood = value.neighborhood;
+
+            if (locationStr && placeId) {
+              // Parse location string "lon,lat" to extract coordinates
+              const [lon, lat] = locationStr.split(',').map(parseFloat);
+
+              // Parse types - FT.SEARCH returns the JSON array directly
+              let types = [];
+              if (Array.isArray(typesRaw)) {
+                types = typesRaw;
+              } else if (typeof typesRaw === 'string') {
+                // Fallback: try parsing as JSON string
+                try {
+                  types = JSON.parse(typesRaw);
+                } catch (e) {
+                  types = [];
+                }
+              }
+
+              // Filter out generic types that don't add value
+              types = types.filter(t => t !== 'point_of_interest' && t !== 'establishment');
+
+              pois.push({
+                id: placeId,
+                name: name || 'Unknown Place',
+                latitude: lat,
+                longitude: lon,
+                types: types,
+                rating: rating ? parseFloat(rating) : null,
+                primary: primary === 'true' || primary === true || primary === '1' || primary === 1,
+                country: country || null,
+                city: city || null,
+                neighborhood: neighborhood || null
+              });
+            }
+          } catch (err) {
+            console.warn(`[poiHelpers] Failed to parse POI document:`, err.message);
+          }
+        }
+      }
+
+      return pois;
+    } catch (err) {
+      console.error('[poiHelpers] RediSearch FT.SEARCH query failed:', err);
+      console.error('[poiHelpers] Query was:', query);
+      return [];
+    }
+  };
+
   try {
     console.log(`[poiHelpers] Querying RediSearch for POIs near (${latitude}, ${longitude}) within ${radiusMeters}m`);
 
-    // Helper function to execute RediSearch geospatial query using FT.SEARCH
-    // FT.SEARCH automatically sorts by distance for GEO queries
-    const searchPois = async (radius, filterPrimary = false) => {
-      // RediSearch GEO query syntax: @location:[lon lat radius unit]
-      // Build query with GEO filter + optional primary filter
-      let query = `@location:[${longitude} ${latitude} ${radius} m]`;
-      if (filterPrimary) {
-        query += ' @primary:{true}';
-      }
-
-      try {
-        debugLog('RediSearch FT.SEARCH query:', query);
-
-        // Use FT.SEARCH with SORTBY and LIMIT
-        // GEO queries automatically calculate distance and can sort by it
-        const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
-          LIMIT: { from: 0, size: 40 },
-          // Note: SORTBY is optional for GEO queries as they're sorted by distance by default
-        });
-
-        debugLog('RediSearch FT.SEARCH returned', results.total, 'documents');
-
-        // Parse results from FT.SEARCH
-        const pois = [];
-        if (results.documents) {
-          for (const doc of results.documents) {
-            try {
-              const { value } = doc;
-
-              if (!value) {
-                console.warn(`[poiHelpers] Document has no value:`, doc);
-                continue;
-              }
-
-              // Extract fields from document
-              const locationStr = value.location;
-              const placeId = value.place_id;
-              const name = value.name;
-              const typesRaw = value.types;
-              const rating = value.rating;
-              const primary = value.primary;
-              const country = value.country;
-              const city = value.city;
-              const neighborhood = value.neighborhood;
-
-              if (locationStr && placeId) {
-                // Parse location string "lon,lat" to extract coordinates
-                const [lon, lat] = locationStr.split(',').map(parseFloat);
-
-                // Parse types - FT.SEARCH returns the JSON array directly
-                let types = [];
-                if (Array.isArray(typesRaw)) {
-                  types = typesRaw;
-                } else if (typeof typesRaw === 'string') {
-                  // Fallback: try parsing as JSON string
-                  try {
-                    types = JSON.parse(typesRaw);
-                  } catch (e) {
-                    types = [];
-                  }
-                }
-
-                const originalTypes = [...types];
-
-                // Filter out generic types that don't add value, but only if there are other types
-                types = types.filter(t => t !== 'point_of_interest' && t !== 'establishment');
-
-                pois.push({
-                  id: placeId,
-                  name: name || 'Unknown Place',
-                  latitude: lat,
-                  longitude: lon,
-                  types: types,
-                  rating: rating ? parseFloat(rating) : null,
-                  primary: primary === 'true' || primary === true || primary === '1' || primary === 1,
-                  country: country || null,
-                  city: city || null,
-                  neighborhood: neighborhood || null
-                });
-              }
-            } catch (err) {
-              console.warn(`[poiHelpers] Failed to parse POI document:`, err.message);
-            }
-          }
-        }
-
-        return pois;
-      } catch (err) {
-        console.error('[poiHelpers] RediSearch FT.SEARCH query failed:', err);
-        console.error('[poiHelpers] Query was:', query);
-        return [];
-      }
-    };
-
     // Step 1: Query primary POIs within radiusMeters
-    let pois = await searchPois(radiusMeters, true);
+    let pois = await searchAndParsePois(radiusMeters, true);
     console.log(`[poiHelpers] Found ${pois.length} primary POIs within ${radiusMeters}m`);
 
-    // Step 2: If < 40 primary POIs, include all POIs (primary + secondary)
-    if (pois.length < 40) {
-      console.log(`[poiHelpers] Less than 40 primary POIs, including secondary POIs`);
-      pois = await searchPois(radiusMeters, false);
+    // Step 2: If < MAX_POIS_IN_TOURPLAN_CONTEXT primary POIs, include all POIs (primary + secondary)
+    if (pois.length < MAX_POIS_IN_TOURPLAN_CONTEXT) {
+      console.log(`[poiHelpers] Less than ${MAX_POIS_IN_TOURPLAN_CONTEXT} primary POIs, including secondary POIs`);
+      pois = await searchAndParsePois(radiusMeters, false);
       console.log(`[poiHelpers] Found ${pois.length} total POIs within ${radiusMeters}m`);
 
-      // Step 3: If still < 40, expand radius by 1.5x
-      if (pois.length < 40) {
+      // Step 3: If still < MAX_POIS_IN_TOURPLAN_CONTEXT, expand radius by 1.5x
+      if (pois.length < MAX_POIS_IN_TOURPLAN_CONTEXT) {
         const expandedRadius = Math.round(radiusMeters * 1.5);
-        console.log(`[poiHelpers] Still less than 40 POIs, expanding radius to ${expandedRadius}m`);
-        pois = await searchPois(expandedRadius, false);
+        console.log(`[poiHelpers] Still less than ${MAX_POIS_IN_TOURPLAN_CONTEXT} POIs, expanding radius to ${expandedRadius}m`);
+        pois = await searchAndParsePois(expandedRadius, false);
         console.log(`[poiHelpers] Found ${pois.length} POIs within ${expandedRadius}m`);
       }
     }
 
-    // POIs are already limited to 40 and sorted by distance from FT.AGGREGATE
     console.log(`[poiHelpers] Returning ${pois.length} POIs for tour generation`);
     return pois;
 

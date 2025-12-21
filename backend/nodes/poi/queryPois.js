@@ -16,12 +16,12 @@ function debugLog(...args) {
 
 /**
  * Create the queryPois node
- * 
+ *
  * This node queries POIs from Redis cache using RediSearch with intelligent fallback logic:
  * 1. Query primary POIs within radiusMeters
- * 2. If < 40, query all POIs within radiusMeters
- * 3. If still < 40, query all POIs within radiusMeters * 1.5
- * 
+ * 2. If < MAX_POIS_IN_TOURPLAN_CONTEXT, query all POIs within radiusMeters
+ * 3. If still < MAX_POIS_IN_TOURPLAN_CONTEXT, query all POIs within radiusMeters * 1.5
+ *
  * @param {Object} config - Node configuration
  * @param {number} config.latitude - Starting latitude
  * @param {number} config.longitude - Starting longitude

@@ -87,7 +87,7 @@ async function searchBestIcon(message, redisClient) {
 
     if (searchResults.total > 0 && searchResults.documents.length > 0) {
       const iconName = searchResults.documents[0].value.name;
-      console.log(`[assembleAreaContext] Found icon "${iconName}" for message: "${message}"`);
+      debugLog(`[assembleAreaContext] Found icon "${iconName}" for message: "${message}"`);
       return iconName;
     }
   } catch (err) {
@@ -142,7 +142,7 @@ ${poiList}`;
 
     const text = await generateMessagesTraceable(prompt);
 
-    console.log('[assembleAreaContext] Generated messages:', text);
+    debugLog('[assembleAreaContext] Generated messages:', text);
 
     // Parse the response - each line is a message
     const lines = text.split('\n').filter(line => line.trim());
@@ -161,7 +161,7 @@ ${poiList}`;
       // Search for best matching icon using vector search
       const icon = await searchBestIcon(message, redisClient);
 
-      console.log(`best icon: ${icon} for message: ${message}`);
+      debugLog(`best icon: ${icon} for message: ${message}`);
       debugLog('best icon:', icon, 'for message:', message);
       
       return { icon, message };
@@ -199,7 +199,7 @@ export function createAssembleAreaContextNode({ sessionId, redisClient }) {
     const neighborhoodData = state.neighborhoodData || { summary: null, keyFacts: null };
 
     try {
-      console.log('[assembleAreaContext] Assembling area context...');
+      debugLog('Assembling area context...');
       debugLog('Assembling context with', {
         country,
         city,

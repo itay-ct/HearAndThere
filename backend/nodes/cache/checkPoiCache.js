@@ -1,13 +1,14 @@
 /**
  * Check POI Cache Node
- * 
- * Checks if we have enough POIs (40+) cached in Redis before calling Google Maps.
+ *
+ * Checks if we have enough POIs (MAX_POIS_IN_TOURPLAN_CONTEXT+) cached in Redis before calling Google Maps.
  * This dramatically reduces API calls and costs.
  */
 
 import { traceable } from 'langsmith/traceable';
 
 const POI_INDEX_NAME = 'idx:pois';
+const MAX_POIS_IN_TOURPLAN_CONTEXT = 40;
 
 /**
  * Ensure RediSearch index exists for POIs
@@ -96,13 +97,13 @@ export const checkPoiCacheHelper = traceable(async ({ latitude, longitude, durat
     console.log(`[checkPoiCache] POI cache check query: ${query}`);
 
     const results = await redisClient.ft.search(POI_INDEX_NAME, query, {
-      LIMIT: { from: 0, size: 40 }
+      LIMIT: { from: 0, size: MAX_POIS_IN_TOURPLAN_CONTEXT }
     });
 
     const poisCount = results.total || 0;
-    const hasSufficientPois = poisCount >= 40;
+    const hasSufficientPois = poisCount >= MAX_POIS_IN_TOURPLAN_CONTEXT;
 
-    console.log(`[checkPoiCache] Found ${poisCount} primary POIs (need 40)`);
+    console.log(`[checkPoiCache] Found ${poisCount} primary POIs (need ${MAX_POIS_IN_TOURPLAN_CONTEXT})`);
 
     return { hasSufficientPois, poisCount, radiusMeters };
   } catch (err) {

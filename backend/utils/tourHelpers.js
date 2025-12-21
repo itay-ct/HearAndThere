@@ -406,10 +406,7 @@ export async function generateToursWithGemini({
       const response = await streamResult.response;
       if (response?.usageMetadata) {
         const { promptTokenCount, candidatesTokenCount, totalTokenCount } = response.usageMetadata;
-        console.log('[tourHelpers] 📊 Gemini API Token Usage:');
-        console.log(`  - Prompt tokens: ${promptTokenCount || 0}`);
-        console.log(`  - Response tokens: ${candidatesTokenCount || 0}`);
-        console.log(`  - Total tokens: ${totalTokenCount || 0}`);
+        console.log(`[tourHelpers] 📊 Gemini API tokens: ${totalTokenCount || 0} (input: ${promptTokenCount || 0} / output: ${candidatesTokenCount || 0})`);
       }
     },
     {
@@ -422,7 +419,7 @@ export async function generateToursWithGemini({
         durationMinutes,
         city,
         neighborhood,
-        poiCount: allPois.length,
+        poiCount: pois.length,
         language,
         streaming: true,
       },
