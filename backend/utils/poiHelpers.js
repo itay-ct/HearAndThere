@@ -91,11 +91,6 @@ export async function cachePlaceInRedis(redisClient, place) {
       location: `${place.longitude},${place.latitude}`, // GEO format: "lon,lat"
       rating: place.rating,
       primary: place.primary !== undefined ? place.primary : true,
-      source: 'google_places_api',
-      fetched_at: new Date().toISOString(),
-      notes: null,
-      tags: [],
-      images: [],
       // Location context fields (populated on-demand during audioguide generation)
       country: place.country || null,
       city: place.city || null,
