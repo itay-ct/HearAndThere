@@ -1,3 +1,4 @@
+
 // Import utility functions
 import { createTourState } from './utils/tourState.js';
 
@@ -156,13 +157,15 @@ async function buildTourGraph({ sessionId, latitude, longitude, durationMinutes,
     return 'query_pois';
   };
 
+  const MINIMUM_POIS_FOR_TOUR_SUGGESTIONS = 40;
+
   const routeAfterQueryPois = (state) => {
     // Check if we actually got POIs from the query
     const poiCount = state.pois?.length || 0;
 
-    // If we have no POIs and haven't tried Google Maps yet, fetch from Google Maps
-    if (poiCount === 0 && !state.googleMapsFetched) {
-      console.warn('[tourGeneration] ⚠️ Routing: query_pois returned 0 POIs, falling back to Google Maps');
+    // If we have insufficient POIs and haven't tried Google Maps yet, fetch from Google Maps
+    if (poiCount < MINIMUM_POIS_FOR_TOUR_SUGGESTIONS && !state.googleMapsFetched) {
+      console.warn(`[tourGeneration] ⚠️ Routing: query_pois returned ${poiCount} POIs (need ${MINIMUM_POIS_FOR_TOUR_SUGGESTIONS}), falling back to Google Maps`);
       return 'fetch_pois_from_google_maps';
     }
 

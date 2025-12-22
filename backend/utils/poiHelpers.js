@@ -10,7 +10,7 @@ import { reverseGeocode, generateCitySummary, generateNeighborhoodSummary } from
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const POI_INDEX_NAME = 'idx:pois';
-const MAX_POIS_IN_TOURPLAN_CONTEXT = 40;
+const MAX_POIS_IN_TOURPLAN_CONTEXT = 60;
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 function debugLog(...args) {
