@@ -11,6 +11,7 @@ import { reverseGeocode, generateCitySummary, generateNeighborhoodSummary } from
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const POI_INDEX_NAME = 'idx:pois';
 const MAX_POIS_IN_TOURPLAN_CONTEXT = 60;
+const MIN_SECONDARY_RATING = 3.5;
 const TOUR_DEBUG = process.env.TOUR_DEBUG === '1' || process.env.TOUR_DEBUG === 'true';
 
 function debugLog(...args) {
@@ -156,22 +157,35 @@ export const searchPlacesNearby = traceable(async (latitude, longitude, radiusMe
   const places = Array.isArray(data.places) ? data.places : [];
   debugLog('searchPlacesNearby: got places count', places.length);
 
-  return places.map((place, index) => {
-    const originalTypes = place.types || [];
+  return places
+    .filter((place) => {
+      // Filter out secondary POIs with rating below MIN_SECONDARY_RATING
+      if (!isPrimary) {
+        const rating = place.rating || null;
+        if (rating === null || rating < MIN_SECONDARY_RATING) {
+          const displayName = place.displayName?.text || 'Unknown Place';
+          console.log(`[poiHelpers] Discarding secondary POI "${displayName}" with rating ${rating}`);
+          return false;
+        }
+      }
+      return true;
+    })
+    .map((place, index) => {
+      const originalTypes = place.types || [];
 
-    // Filter out generic types that don't add value
-    let types = originalTypes.filter(t => t !== 'point_of_interest' && t !== 'establishment');
+      // Filter out generic types that don't add value
+      let types = originalTypes.filter(t => t !== 'point_of_interest' && t !== 'establishment');
 
-    return {
-      id: place.id || `poi_${index + 1}`,
-      name: place.displayName?.text || 'Unknown Place',
-      latitude: place.location?.latitude || latitude,
-      longitude: place.location?.longitude || longitude,
-      types: types,
-      rating: place.rating || null,
-      primary: isPrimary, // Mark as primary or secondary
-    };
-  });
+      return {
+        id: place.id || `poi_${index + 1}`,
+        name: place.displayName?.text || 'Unknown Place',
+        latitude: place.location?.latitude || latitude,
+        longitude: place.location?.longitude || longitude,
+        types: types,
+        rating: place.rating || null,
+        primary: isPrimary, // Mark as primary or secondary
+      };
+    });
 }, { name: 'searchPlacesNearby', run_type: 'tool' });
 
 /**
