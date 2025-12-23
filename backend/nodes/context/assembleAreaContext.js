@@ -52,6 +52,12 @@ function debugLog(...args) {
  * @returns {Promise<string>} Icon name (kebab-case)
  */
 async function searchBestIcon(message, redisClient) {
+  // Skip embedding-based icon search in production
+  if (process.env.NODE_ENV === 'production') {
+    console.log('[assembleAreaContext] Using default icon in production');
+    return DEFAULT_ICON;
+  }
+
   if (!message || !message.trim()) {
     return DEFAULT_ICON;
   }
@@ -62,7 +68,7 @@ async function searchBestIcon(message, redisClient) {
   }
 
   try {
-    // Lazy load embedding model
+    // Lazy load embedding model (development only)
     if (!embeddingModel) {
       const { pipeline } = await import('@xenova/transformers');
       embeddingModel = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
@@ -94,6 +100,7 @@ async function searchBestIcon(message, redisClient) {
     console.error('[assembleAreaContext] Icon search failed:', err.message);
   }
 
+  console.warn('[assembleAreaContext] Embedding model failed, using default icon:', err);
   return DEFAULT_ICON;
 }
 
