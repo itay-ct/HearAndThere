@@ -154,14 +154,14 @@ async function generateWithRetry(prompt, maxRetries = 3) {
       // Check if it's an API error (4xx or 5xx status codes, or specific error messages)
       // This includes: 403 (forbidden), 429 (rate limit), 500 (server error), etc.
       const isApiError = (statusCode && (statusCode >= 400)) ||
-                         errorMessage.includes('429') ||
-                         errorMessage.includes('403') ||
-                         errorMessage.includes('rate limit') ||
-                         errorMessage.includes('quota exceeded') ||
-                         errorMessage.includes('RESOURCE_EXHAUSTED') ||
-                         errorMessage.includes('PERMISSION_DENIED') ||
-                         errorMessage.includes('forbidden') ||
-                         errorMessage.includes('unauthorized');
+        errorMessage.includes('429') ||
+        errorMessage.includes('403') ||
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('quota exceeded') ||
+        errorMessage.includes('RESOURCE_EXHAUSTED') ||
+        errorMessage.includes('PERMISSION_DENIED') ||
+        errorMessage.includes('forbidden') ||
+        errorMessage.includes('unauthorized');
 
       // If API error and not already using fallback, switch to fallback model
       if (isApiError && !useFallback) {
@@ -276,7 +276,9 @@ Create a warm, engaging 2 minute tour introduction script that:
 ${neighborhoodIntroSection}
 ${languageInstruction}
 Write in a natural, conversational style as if speaking directly to the visitor.
-Do NOT include stage directions or speaker labels - just the script text.`;
+Write in a natural, conversational style as if speaking directly to the visitor.
+Do NOT include stage directions or speaker labels - just the script text.
+Do NOT use asterisks (*) or markdown formatting.`;
 
   try {
     const { script, modelUsed } = await generateWithRetry(prompt);
@@ -369,6 +371,7 @@ ${!isLast ? `IMPORTANT: End the script by guiding them to the next stop. Use the
 ${languageInstruction}
 Write in a natural, conversational, enthusiastic style as if you're walking with them.
 Do NOT include stage directions or speaker labels - just the script text.
+Do NOT use asterisks (*) or markdown formatting.
 Keep it between 500-750 words.
 ${isLast ? 'End with a memorable closing that thanks them and wishes them well.' : ''}`;
 
@@ -392,8 +395,9 @@ const synthesizeAudio = traceable(async ({ text, outputFileName, language, voice
   const MAX_BYTES = 4998; // Leave small buffer
 
   // Check byte length and trim if necessary
-  let processedText = text;
-  const textBytes = Buffer.byteLength(text, 'utf8');
+  // Also strip any asterisks to prevent TTS from reading them
+  let processedText = text.replace(/\*/g, '');
+  const textBytes = Buffer.byteLength(processedText, 'utf8');
 
   if (textBytes > MAX_BYTES) {
     console.warn(`[audioguide] WARNING: Script exceeds TTS limit!`);
@@ -413,12 +417,12 @@ const synthesizeAudio = traceable(async ({ text, outputFileName, language, voice
     processedText = trimmedText.trim() + '...';
 
     const finalBytes = Buffer.byteLength(processedText, 'utf8');
-    console.warn(`[audioguide] Trimmed to: ${finalBytes} bytes (${Math.round((finalBytes/textBytes)*100)}% of original)`);
+    console.warn(`[audioguide] Trimmed to: ${finalBytes} bytes (${Math.round((finalBytes / textBytes) * 100)}% of original)`);
   }
 
   // Determine language code from voice name
   const languageCode = voice.startsWith('he-') ? 'he-IL' :
-                       voice.startsWith('en-GB-') ? 'en-GB' : 'en-US';
+    voice.startsWith('en-GB-') ? 'en-GB' : 'en-US';
 
   // Use the provided voice
   const voiceConfig = {
@@ -700,15 +704,15 @@ export async function buildAudioguideGraph({ sessionId, tourId, language, voice,
         // First ensure the stops array exists and has enough elements
         const currentScripts = await redisClient.json.get(tourDataKey, { path: '$.scripts.stops' });
         const stopsArray = (Array.isArray(currentScripts) && currentScripts.length > 0) ? currentScripts[0] : [];
-        
+
         // Extend array if needed
         while (stopsArray.length <= stopIndex) {
           stopsArray.push(null);
         }
-        
+
         // Update the entire stops array first
         await redisClient.json.set(tourDataKey, '$.scripts.stops', stopsArray);
-        
+
         // Now set the specific stop
         await redisClient.json.set(tourDataKey, `$.scripts.stops[${stopIndex}]`, {
           status: 'complete',

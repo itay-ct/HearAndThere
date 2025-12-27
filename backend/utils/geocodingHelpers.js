@@ -99,7 +99,7 @@ async function getGeminiModel() {
         return null;
       });
   }
-  
+
   return geminiModelPromise;
 }
 
@@ -629,7 +629,7 @@ ${cityContext ? `CITY CONTEXT:\n${cityContext}\n` : ''}
 
 TASK:
 Write a 1-2 minute spoken introduction script that:
-1. Starts with: "While your audioguide is being prepared, here's an intro about ${neighborhood}..."
+1. Starts by welcoming the listener to ${neighborhood}
 2. Provides interesting insights about the neighborhood and city
 3. Makes the listener excited to explore
 4. Ends with an excited tone: "Let's go!"
@@ -640,6 +640,7 @@ REQUIREMENTS:
 - Engaging and enthusiastic
 - Focus on what makes this area special
 - NO markdown, NO special formatting, just plain text
+- Do NOT use asterisks (*)
 - End with "Let's go!"
 
 Write the script now:`;
