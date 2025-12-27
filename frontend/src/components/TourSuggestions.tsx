@@ -90,8 +90,8 @@ export function TourSuggestions({
               <article
                 key={tour.id}
                 className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 bg-white/90 ${selectedTourId === tour.id
-                    ? 'border-[#f36f5e] ring-1 ring-[#f36f5e]/40'
-                    : 'border-slate-200'
+                  ? 'border-[#2FA4A9] ring-1 ring-[#2FA4A9]/40'
+                  : 'border-slate-200'
                   }`}
               >
                 <div className="flex items-center gap-3 mb-2">
@@ -134,7 +134,7 @@ export function TourSuggestions({
                 <button
                   type="button"
                   onClick={() => onSelectTour(tour)}
-                  className="inline-flex w-full items-center justify-center rounded-xl bg-[#f36f5e] px-3 py-2 text-xs font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-[#2FA4A9] px-3 py-2 text-xs font-semibold text-white shadow-[#2FA4A9]/40 transition hover:bg-[#258387]"
                 >
                   {selectedTourId === tour.id ? 'Selected' : 'Select this tour'}
                 </button>

@@ -891,7 +891,7 @@ function App() {
           icon: {
             url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="16" cy="16" r="12" fill="#f36f5e" stroke="white" stroke-width="2"/>
+                <circle cx="16" cy="16" r="12" fill="#1F2A44" stroke="white" stroke-width="2"/>
               </svg>
             `),
             scaledSize: new window.google.maps.Size(32, 32),
@@ -904,7 +904,7 @@ function App() {
       const directionsRenderer = new window.google.maps.DirectionsRenderer({
         suppressMarkers: true, // We're using custom markers
         polylineOptions: {
-          strokeColor: '#f36f5e',
+          strokeColor: '#1F2A44',
           strokeWeight: 4,
           strokeOpacity: 0.8,
         }
@@ -1167,7 +1167,7 @@ function App() {
                   <button
                     type="submit"
                     disabled={!canSubmit || status === 'saving'}
-                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-2.5 text-sm font-semibold text-white shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#2FA4A9] px-5 py-2.5 text-sm font-semibold text-white shadow-[#2FA4A9]/40 transition hover:bg-[#258387] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {status === 'saving' ? 'Generating tours…' : 'Create My Tours'}
                   </button>
@@ -1314,7 +1314,7 @@ function App() {
                   <button
                     type="button"
                     onClick={handleGenerateAudioguide}
-                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-[#2FA4A9] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#2FA4A9]/40 transition hover:bg-[#258387]"
                   >
                     🎧 Generate Audioguide
                   </button>
