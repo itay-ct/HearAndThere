@@ -50,7 +50,7 @@ function App() {
   const [audioguideError, setAudioguideError] = useState<string | null>(null)
   const [] = useState<string | null>(null)
   const [toursGenerated, setToursGenerated] = useState<boolean>(false)
-  const [shareableTourId, setShareableTourId] = useState<string | null>(null)
+
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
   const [showLocationInputs, setShowLocationInputs] = useState<boolean>(false)
   const [selectedVoice, setSelectedVoice] = useState<string>(ENGLISH_VOICE)
@@ -203,12 +203,12 @@ function App() {
             newMessage = 'Looking what\'s around...'
         }
       }
-      
+
       // Always update persistent message when we have a new one
       if (newMessage) {
         setPersistentStageMessage(newMessage)
       }
-      
+
       return newMessage
     },
     [],
@@ -777,7 +777,7 @@ function App() {
     setAudioguideGenerating(true)
     setAudioguideData(null)
     setAudioguideError(null)
-    setShareableTourId(null)
+    setAudioguideError(null)
     setMessage('Generating audioguide scripts and audio files...')
 
     try {
@@ -798,9 +798,10 @@ function App() {
       const data = await response.json()
       console.log('Audioguide generation started:', data)
 
-      // Store the shareable tour ID
+      // Store the shareable tour ID and redirect immediately
       if (data.tourId) {
-        setShareableTourId(data.tourId)
+        window.location.href = `/tour/${data.tourId}`
+        return
       }
 
       setMessage('Audioguide generation in progress...')
@@ -1231,12 +1232,7 @@ function App() {
                 <p className="text-sm text-slate-600">{selectedTour.abstract}</p>
               </header>
 
-              {/* Legal disclaimer */}
-              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <p className="text-xs text-amber-800 text-center">
-                  Routes are AI-generated. Always stay aware of your surroundings and use your own judgment.
-                </p>
-              </div>
+
 
               {mapError ? (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
@@ -1249,6 +1245,13 @@ function App() {
                   style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
                 />
               )}
+
+              {/* Legal disclaimer */}
+              <div className="mb-6 text-center">
+                <p className="text-xs text-slate-500">
+                  Routes are AI-generated. Always stay aware of your surroundings and use your own judgment.
+                </p>
+              </div>
 
               <div className="bg-slate-50 rounded-xl p-4 mb-6">
                 <h3 className="text-sm font-semibold text-slate-800 mb-2">Tour Details</h3>
@@ -1321,27 +1324,7 @@ function App() {
           )}
 
 
-          {selectedTour && shareableTourId && (
-            <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
-                <h3 className="text-sm font-semibold text-emerald-900 mb-4">
-                  🎧 Your Audioguide is Being Created!
-                </h3>
-                <p className="text-xs text-emerald-700 mb-6">
-                  Your personalized audioguide is being generated. Click the button below to view your tour page.
-                </p>
-                <button
-                  onClick={() => window.location.href = `/tour/${shareableTourId}`}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#f36f5e] px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-[#f36f5e]/40 transition hover:bg-[#e35f4f]"
-                >
-                  🎧 Take me to my audiotour
-                </button>
-                <p className="text-xs text-slate-500 mt-4">
-                  You can share this link with others!
-                </p>
-              </div>
-            </div>
-          )}
+
 
 
           {/* Status Message */}

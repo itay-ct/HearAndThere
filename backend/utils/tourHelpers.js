@@ -260,26 +260,34 @@ export async function generateToursWithGemini({
     : 'Respond strictly as JSON with a top-level "tours" array.';
 
   const systemPrompt = [
-    'You are an experienced local tour guide who designs walking tours ',
-    'that balance must-see highlights with moments of local discovery.',
+    'Act as experienced tour guide,',
+    'design a walking tour balancing must-see highlights with moments of local discovery.',
     'Create walking tours using ONLY real places that exist in the list below.',
-    'Given a starting point nearby points of interest, and context,',
+    'Given a starting point nearby points of interest, ',
     'generate 2 to 10 walking tours with clear and distinct themes.',
-    'Ensure that at least one tour includes nearby must-see or iconic points of interest,',
-    'when such places exist in the list below.',
-    'Prioritize diversity between tours in both routes and points of interest.',
-    'Design tours to be pleasant to walk and discovery-oriented.',
+    'Generate all tour titles, abstracts, themes, and stop names in ENGLISH.',
+    'Tours should be pleasant to walk and discovery-oriented.',
+    'Sequence stops in a logical, geographic order that minimizes total walking distance and avoids backtracking or unnecessary zigzagging.',
+    'Based on the city and neighborhood of the tour, try and include the must see and iconic sites. ',
+    'Prioritize places based on their rating.',
+    "Limit stops with 'food' type to one per tour unless it has a 'market' or 'tourist_attraction' type as well. ",
     'Avoid long, uneventful walks to the first stop when possible.',
     'If the first highlight is far away, either ensure it is truly worthwhile or include interesting micro-stops along the way.',
-    `Include approximately ${minimumStops} stops per tour,`,
-    `Tours must be meaningfully distinct: Any two tours may share at most ${sharedStops} points of interest, even in a different order. Exclude any tour that violates it.`,
-    `The total tour should take approximately ${Math.round(durationMinutes * 0.8)} minutes.`,
+
 
     languageInstruction,
     customizationInstruction,
     responseFormatInstruction,
     //    'Each tour object must have: id, title, abstract, theme, estimatedTotalMinutes, stops.',
     //    'Each stop must have: name, latitude, longitude, dwellMinutes, walkMinutesFromPrevious.',
+  ].join(' ');
+
+  // Ending of system prompt
+  const systemPromptEnd = [
+    'Prioritize diversity between tours in both routes and points of interest, ',
+    `tours should be meaningfully distinct not sharing more than ${sharedStops} points of interest.`,
+    `Each tour should total about ${Math.round(durationMinutes * 0.8)} minutes (dwell & walk), `,
+    `and Include about ${minimumStops} stops.`,
   ].join(' ');
 
   // Helper function to format POI with index number
@@ -299,7 +307,7 @@ export async function generateToursWithGemini({
 
   // Format city context
   const INCLUDE_DETAILED_CONTEXT = false; // Set to true to include summaries and key facts on city and neighbourhood
-  
+
   let cityContextText = '';
   if (cityData && city) {
     if (INCLUDE_DETAILED_CONTEXT) {
@@ -355,6 +363,8 @@ export async function generateToursWithGemini({
   inputParts.push('IMPORTANT: Return ONLY the NUMBER (poiIndex) for each stop. ');
   inputParts.push('');
   inputParts.push(poisText);
+  inputParts.push('');
+  inputParts.push(systemPromptEnd);
   inputParts.push('');
 
   const prompt = inputParts.join('\n');
