@@ -200,7 +200,7 @@ function App() {
             newMessage = 'Finalizing your tours...'
             break
           default:
-            newMessage = 'Looking what\'s around...'
+            newMessage = 'Looking at what\'s around you...'
         }
       }
 
@@ -534,7 +534,7 @@ function App() {
 
     setSessionId(clientSessionId)
     setMessage('Saving your location and preferences...')
-    setLoadingStatus('Looking what\'s around...')
+    setLoadingStatus('Looking at what\'s around you...')
     setShowTourSuggestions(true) // Show tour suggestions component immediately
     startProgressPolling(clientSessionId)
 

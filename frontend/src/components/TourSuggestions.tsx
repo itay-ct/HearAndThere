@@ -72,7 +72,7 @@ export function TourSuggestions({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
                 <span className="relative inline-flex size-3 rounded-full bg-sky-500"></span>
               </span>
-              {stageMessage || 'Looking around you...'}
+              {stageMessage || 'Looking at what\'s around you...'}
             </span>
           ) : (
             <span className="inline-flex items-center gap-2">
@@ -89,11 +89,10 @@ export function TourSuggestions({
             {tours.map((tour) => (
               <article
                 key={tour.id}
-                className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 bg-white/90 ${
-                  selectedTourId === tour.id
+                className={`min-w-[260px] flex-1 rounded-2xl border px-4 py-4 bg-white/90 ${selectedTourId === tour.id
                     ? 'border-[#f36f5e] ring-1 ring-[#f36f5e]/40'
                     : 'border-slate-200'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-3 mb-2">
                   <div className="flex-1">
