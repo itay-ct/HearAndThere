@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Play, Pause, ChevronDown, ChevronUp } from 'lucide-react'
+import { Play, Pause, ChevronDown, ChevronUp, Frown, Meh, Laugh } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.MODE === 'production'
   ? 'https://api.hearnthere.com'
@@ -91,11 +91,7 @@ export default function TourPlayer() {
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null)
   const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set())
   const [expandedDirections, setExpandedDirections] = useState<Set<number>>(new Set())
-  const [feedback, setFeedback] = useState<string>('')
-  const [rating, setRating] = useState<number>(0)
-  const [hoveredRating, setHoveredRating] = useState<number>(0)
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
-  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
+  const [selectedFeedback, setSelectedFeedback] = useState<'frown' | 'meh' | 'laugh' | null>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<google.maps.Map | null>(null)
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
@@ -389,34 +385,6 @@ export default function TourPlayer() {
       })
 
       navigator.mediaSession.playbackState = 'playing'
-    }
-  }
-
-  const handleSubmitFeedback = async () => {
-    if (!tourId || !rating) return
-
-    setFeedbackSubmitting(true)
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/tour/${tourId}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rating,
-          feedback: feedback.trim() || null,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to submit feedback')
-      }
-
-      setFeedbackSubmitted(true)
-    } catch (err) {
-      console.error('Failed to submit feedback:', err)
-      alert('Failed to submit feedback. Please try again.')
-    } finally {
-      setFeedbackSubmitting(false)
     }
   }
 
@@ -808,81 +776,79 @@ export default function TourPlayer() {
         {/* Feedback Section */}
         {tourData.status === 'complete' && (
           <div className="rounded-3xl bg-white/80 shadow-lg shadow-sky-900/5 border border-sky-900/5 p-8">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">💬 Share Your Feedback</h2>
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Share Your Feedback</h2>
+            <p className="text-xs text-slate-600 mb-4">
+              How was your experience?
+            </p>
 
-            {!feedbackSubmitted ? (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-600">
-                  How was your experience with this audioguide? Your feedback helps us improve!
-                </p>
+            {/* Feedback Icons */}
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <button
+                onClick={() => setSelectedFeedback('frown')}
+                className={`flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all ${
+                  selectedFeedback === 'frown'
+                    ? 'border-slate-400 bg-slate-600'
+                    : 'border-slate-300 bg-transparent hover:bg-slate-100'
+                }`}
+              >
+                <Frown
+                  size={32}
+                  className={selectedFeedback === 'frown' ? 'text-slate-100' : 'text-slate-700'}
+                />
+              </button>
 
-                {/* Star Rating */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Rating</label>
-                  <div className="flex items-center gap-2">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setRating(star)}
-                        onMouseEnter={() => setHoveredRating(star)}
-                        onMouseLeave={() => setHoveredRating(0)}
-                        disabled={feedbackSubmitting}
-                        className="text-3xl transition-all duration-150 hover:scale-110 disabled:cursor-not-allowed"
-                      >
-                        {star <= (hoveredRating || rating) ? (
-                          <span className="text-yellow-400">★</span>
-                        ) : (
-                          <span className="text-slate-300">☆</span>
-                        )}
-                      </button>
-                    ))}
-                    {rating > 0 && (
-                      <span className="ml-2 text-sm text-slate-600">
-                        {rating} {rating === 1 ? 'star' : 'stars'}
-                      </span>
-                    )}
-                  </div>
-                </div>
+              <button
+                onClick={() => setSelectedFeedback('meh')}
+                className={`flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all ${
+                  selectedFeedback === 'meh'
+                    ? 'border-slate-400 bg-slate-600'
+                    : 'border-slate-300 bg-transparent hover:bg-slate-100'
+                }`}
+              >
+                <Meh
+                  size={32}
+                  className={selectedFeedback === 'meh' ? 'text-slate-100' : 'text-slate-700'}
+                />
+              </button>
 
-                {/* Feedback Text (Optional) */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Comments <span className="text-slate-400 font-normal">(optional)</span>
-                  </label>
-                  <textarea
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    placeholder="Share your thoughts about the tour, audio quality, directions, or anything else..."
-                    className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent resize-none"
-                    rows={4}
-                    disabled={feedbackSubmitting}
-                  />
-                </div>
+              <button
+                onClick={() => setSelectedFeedback('laugh')}
+                className={`flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all ${
+                  selectedFeedback === 'laugh'
+                    ? 'border-slate-400 bg-slate-600'
+                    : 'border-slate-300 bg-transparent hover:bg-slate-100'
+                }`}
+              >
+                <Laugh
+                  size={32}
+                  className={selectedFeedback === 'laugh' ? 'text-slate-100' : 'text-slate-700'}
+                />
+              </button>
+            </div>
 
-                <button
-                  onClick={handleSubmitFeedback}
-                  disabled={!rating || feedbackSubmitting}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#2FA4A9] px-6 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#2FA4A9]/40 transition hover:bg-[#258387] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {feedbackSubmitting ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      Submitting...
-                    </>
-                  ) : (
-                    'Submit Feedback'
-                  )}
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 text-center">
-                <p className="text-sm font-semibold text-emerald-900 mb-2">✓ Thank you!</p>
-                <p className="text-xs text-emerald-700">
-                  Your feedback has been submitted and will help us improve future tours.
-                </p>
-              </div>
-            )}
+            {/* Share Feedback Button */}
+            <a
+              href={selectedFeedback ? `mailto:hi@hearnthere.com?subject=Feedback&body=Tour ID: ${tourId}%0D%0A%0D%0AHi,%0D%0A%0D%0A${
+                selectedFeedback === 'frown'
+                  ? 'I am unsatisfied about Hear %26 There, and have the following suggestion for improvement:%0D%0A%0D%0A'
+                  : selectedFeedback === 'meh'
+                  ? 'My feedback on this tour and Hear %26 There in general is:%0D%0A%0D%0A'
+                  : 'That was great! Here is what I liked about this tour, and what I think of Hear %26 There in general:%0D%0A%0D%0A'
+              }` : '#'}
+              onClick={(e) => {
+                if (!selectedFeedback) {
+                  e.preventDefault()
+                }
+              }}
+              className={`w-full inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-semibold shadow-sm transition no-underline ${
+                selectedFeedback
+                  ? 'bg-[#2FA4A9] text-white shadow-[#2FA4A9]/40 hover:bg-[#258387] cursor-pointer'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+              style={{ color: selectedFeedback ? 'white' : undefined }}
+            >
+              Share Feedback
+            </a>
           </div>
         )}
 
